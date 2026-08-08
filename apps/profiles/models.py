@@ -44,24 +44,6 @@ class CandidateProfile(models.Model):
         return bool(self.full_name.strip()) and self.timezone in IANA_TIMEZONES
 
 
-class PresentationPreferences(models.Model):
-    profile = models.OneToOneField(
-        CandidateProfile,
-        on_delete=models.CASCADE,
-        related_name="presentation_preferences",
-    )
-    show_contact_details = models.BooleanField(default=True)
-    show_professional_summary = models.BooleanField(default=True)
-    show_experience = models.BooleanField(default=True)
-    show_education = models.BooleanField(default=True)
-    show_projects = models.BooleanField(default=True)
-    show_skills = models.BooleanField(default=True)
-    show_languages = models.BooleanField(default=True)
-
-    def __str__(self) -> str:
-        return f"Presentation preferences for {self.profile}"
-
-
 class Experience(models.Model):
     profile = models.ForeignKey(
         CandidateProfile,

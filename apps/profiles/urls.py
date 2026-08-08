@@ -17,7 +17,6 @@ from apps.profiles.views import (
     language_delete,
     language_edit,
     language_reorder,
-    presentation_preferences,
     profile,
     project_create,
     project_delete,
@@ -108,10 +107,5 @@ urlpatterns = [
         "profile/languages/<int:language_id>/reorder/",
         language_reorder,
         name="language_reorder",
-    ),
-    path(
-        "profile/preferences/",
-        presentation_preferences,
-        name="presentation_preferences",
     ),
 ]

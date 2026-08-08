@@ -35,7 +35,7 @@ Do not call an Account a customer, member, tenant, or workspace user.
 
 ### Candidate Profile
 
-The candidate's structured source data. It contains identity and contact details, professional summary, Experience entries and highlights, Education entries, Projects, Skills, Languages, and presentation preferences.
+The candidate's structured source data. It contains identity and contact details, professional summary, Experience entries and highlights, Education entries, Projects, Skills, and Languages.
 
 The profile is relational. A previously used JSON resume shape is neither the persistence model nor a supported import/export contract.
 

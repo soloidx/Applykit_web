@@ -10,7 +10,6 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
-    PresentationPreferences,
     Project,
     Skill,
     validate_iana_timezone,
@@ -251,33 +250,3 @@ class LanguageForm(forms.ModelForm):
         ):
             raise forms.ValidationError("This language is already in your profile.")
         return name
-
-
-class PresentationPreferencesForm(forms.ModelForm):
-    class Meta:
-        model = PresentationPreferences
-        fields = [
-            "show_contact_details",
-            "show_professional_summary",
-            "show_experience",
-            "show_education",
-            "show_projects",
-            "show_skills",
-            "show_languages",
-        ]
-        labels = {
-            "show_contact_details": "Contact details",
-            "show_professional_summary": "Professional summary",
-            "show_experience": "Experience",
-            "show_education": "Education",
-            "show_projects": "Projects",
-            "show_skills": "Skills",
-            "show_languages": "Languages",
-        }
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            field.widget.attrs["class"] = (
-                "h-4 w-4 rounded border-ink/20 text-coral focus:ring-coral/20"
-            )

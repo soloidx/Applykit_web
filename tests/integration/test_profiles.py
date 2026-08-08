@@ -12,7 +12,6 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
-    PresentationPreferences,
     Project,
     Skill,
 )
@@ -777,59 +776,7 @@ def test_candidate_can_manage_languages_with_proficiency_and_htmx_feedback() -> 
 
 
 @pytest.mark.django_db
-def test_presentation_preferences_are_independent_from_career_history() -> None:
-    account = verified_account("candidate@example.com")
-    profile = create_profile(account)
-    experience = Experience.objects.create(
-        profile=profile,
-        role="Senior engineer",
-        organization="Analytical Engines Ltd",
-        location="London, UK",
-        start_date="2020-01-01",
-    )
-    client = Client()
-    client.force_login(account)
-
-    response = client.post(
-        reverse("presentation_preferences"),
-        {
-            "show_contact_details": "",
-            "show_professional_summary": "",
-            "show_experience": "on",
-            "show_education": "",
-            "show_projects": "on",
-            "show_skills": "on",
-            "show_languages": "",
-        },
-    )
-
-    assert response.url == reverse("profile")
-    preferences = PresentationPreferences.objects.get(profile=profile)
-    assert preferences.show_contact_details is False
-    assert preferences.show_experience is True
-    assert preferences.show_languages is False
-    assert Experience.objects.get(pk=experience.pk).role == "Senior engineer"
-
-    htmx_response = client.post(
-        reverse("presentation_preferences"),
-        {
-            "show_contact_details": "on",
-            "show_professional_summary": "on",
-            "show_experience": "on",
-            "show_education": "on",
-            "show_projects": "",
-            "show_skills": "on",
-            "show_languages": "on",
-        },
-        headers={"HX-Request": "true"},
-    )
-
-    assert htmx_response.headers["HX-Redirect"] == reverse("profile")
-    assert PresentationPreferences.objects.get(profile=profile).show_projects is False
-
-
-@pytest.mark.django_db
-def test_skill_language_and_preference_operations_cannot_cross_account_boundaries() -> None:
+def test_skill_and_language_operations_cannot_cross_account_boundaries() -> None:
     owner = verified_account("owner@example.com")
     intruder = verified_account("intruder@example.com")
     profile = create_profile(owner)
@@ -857,14 +804,3 @@ def test_skill_language_and_preference_operations_cannot_cross_account_boundarie
 
     assert Skill.objects.get(pk=skill.pk).name == "Python"
     assert Language.objects.get(pk=language.pk).name == "English"
-    preferences_response = client.post(
-        reverse("presentation_preferences"),
-        {"show_experience": "on"},
-    )
-
-    assert preferences_response.status_code == 302
-    assert PresentationPreferences.objects.filter(
-        profile=intruder.candidate_profile,
-        show_experience=True,
-    ).exists()
-    assert not PresentationPreferences.objects.filter(profile=profile).exists()

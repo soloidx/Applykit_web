@@ -16,7 +16,6 @@ from apps.profiles.forms import (
     ExperienceForm,
     HighlightForm,
     LanguageForm,
-    PresentationPreferencesForm,
     ProjectForm,
     SkillForm,
 )
@@ -26,7 +25,6 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
-    PresentationPreferences,
     Project,
     Skill,
 )
@@ -52,11 +50,7 @@ def _profile_context(
     skill_form_action: str | None = None,
     language_form: LanguageForm | None = None,
     language_form_action: str | None = None,
-    presentation_preferences_form: PresentationPreferencesForm | None = None,
 ) -> dict[str, object]:
-    presentation_preferences, _ = PresentationPreferences.objects.get_or_create(
-        profile=candidate_profile
-    )
     return {
         "candidate_profile": candidate_profile,
         "experiences": candidate_profile.experiences.prefetch_related("highlights"),
@@ -81,10 +75,6 @@ def _profile_context(
         if language_form is not None
         else LanguageForm(profile=candidate_profile),
         "language_form_action": language_form_action or reverse("language_create"),
-        "presentation_preferences": presentation_preferences,
-        "presentation_preferences_form": presentation_preferences_form
-        if presentation_preferences_form is not None
-        else PresentationPreferencesForm(instance=presentation_preferences),
     }
 
 
@@ -717,24 +707,3 @@ def language_reorder(request: HttpRequest, language_id: int) -> HttpResponse:
             for position, item in enumerate(languages):
                 Language.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
-
-
-@login_required
-@verified_account_required
-def presentation_preferences(request: HttpRequest) -> HttpResponse:
-    account = cast(Account, request.user)
-    profile = _profile_for_account(account)
-    preferences, _ = PresentationPreferences.objects.get_or_create(profile=profile)
-    form = PresentationPreferencesForm(request.POST or None, instance=preferences)
-    if request.method == "POST" and form.is_valid():
-        form.save()
-        return _redirect_or_htmx_redirect(request)
-
-    context = _profile_context(
-        profile,
-        presentation_preferences_form=form,
-    )
-    if _is_htmx(request):
-        return render(request, "profiles/_preferences_form.html", context)
-    context["form"] = CandidateProfileForm(instance=profile)
-    return render(request, "profiles/profile.html", context)
