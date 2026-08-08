@@ -23,6 +23,7 @@ from apps.applications.models import Company, JobApplication, RecruitmentEvent
 from apps.applications.services import (
     create_or_reuse_company,
     create_recruitment_event,
+    delete_application,
     transition_application,
     update_recruitment_event,
 )
@@ -34,8 +35,7 @@ def _is_htmx(request: HttpRequest) -> bool:
     return request.headers.get("HX-Request") == "true"
 
 
-def _redirect_or_htmx_redirect(request: HttpRequest, application: JobApplication) -> HttpResponse:
-    destination = reverse("application_edit", args=[application.pk])
+def _redirect_or_htmx_redirect(request: HttpRequest, destination: str) -> HttpResponse:
     if _is_htmx(request):
         response = HttpResponse(status=200)
         response["HX-Redirect"] = destination
@@ -91,7 +91,10 @@ def application_create(request: HttpRequest) -> HttpResponse:
             )
             if reused:
                 messages.info(request, "An existing company matched that website and was reused.")
-            return _redirect_or_htmx_redirect(request, application)
+            return _redirect_or_htmx_redirect(
+                request,
+                reverse("application_edit", args=[application.pk]),
+            )
     return render(request, "applications/form.html", {"form": form})
 
 
@@ -117,7 +120,10 @@ def application_edit(request: HttpRequest, application_id: int) -> HttpResponse:
     form = JobApplicationEditForm(request.POST, instance=application)
     if form.is_valid():
         form.save()
-        return _redirect_or_htmx_redirect(request, application)
+        return _redirect_or_htmx_redirect(
+            request,
+            reverse("application_edit", args=[application.pk]),
+        )
     return render(request, "applications/form.html", {"form": form, "application": application})
 
 
@@ -165,6 +171,34 @@ def application_detail(request: HttpRequest, application_id: int) -> HttpRespons
     )
 
 
+@login_required
+@verified_account_required
+def application_delete(request: HttpRequest, application_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(
+        JobApplication.objects.select_related("campaign", "company"),
+        pk=application_id,
+        account=account,
+    )
+    context = {
+        "application": application,
+        "contributes_to_progress": application.first_submitted_at is not None,
+    }
+    if request.method == "GET":
+        return render(request, "applications/delete.html", context)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    if request.POST.get("cancel"):
+        return _redirect_or_htmx_redirect(
+            request,
+            reverse("application_detail", args=[application.pk]),
+        )
+    if request.POST.get("confirm"):
+        delete_application(account=account, application_id=application.pk)
+        return _redirect_or_htmx_redirect(request, reverse("dashboard"))
+    return render(request, "applications/delete.html", context, status=400)
+
+
 def _application_detail_context(
     account: Account,
     application: JobApplication,
@@ -197,15 +231,6 @@ def _application_detail_context(
     }
 
 
-def _event_redirect(request: HttpRequest, application: JobApplication) -> HttpResponse:
-    destination = reverse("application_detail", args=[application.pk])
-    if _is_htmx(request):
-        response = HttpResponse(status=200)
-        response["HX-Redirect"] = destination
-        return response
-    return redirect(destination)
-
-
 @login_required
 @verified_account_required
 def recruitment_event_create(request: HttpRequest, application_id: int) -> HttpResponse:
@@ -224,7 +249,10 @@ def recruitment_event_create(request: HttpRequest, application_id: int) -> HttpR
             custom_title=str(form.cleaned_data["custom_title"]),
             scheduled_at=form.cleaned_data["scheduled_at"],
         )
-        return _event_redirect(request, application)
+        return _redirect_or_htmx_redirect(
+            request,
+            reverse("application_detail", args=[application.pk]),
+        )
     return render(
         request,
         "applications/detail.html",
@@ -265,7 +293,10 @@ def recruitment_event_edit(
             scheduled_at=form.cleaned_data["scheduled_at"],
             status=str(form.cleaned_data["status"]),
         )
-        return _event_redirect(request, application)
+        return _redirect_or_htmx_redirect(
+            request,
+            reverse("application_detail", args=[application.pk]),
+        )
     event.form = form
     return render(
         request,

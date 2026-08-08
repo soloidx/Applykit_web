@@ -119,6 +119,15 @@ def transition_application(*, account: Account, application_id: int, stage: str)
 
 
 @transaction.atomic
+def delete_application(*, account: Account, application_id: int) -> None:
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
+    )
+    application.delete()
+
+
+@transaction.atomic
 def create_recruitment_event(
     *,
     account: Account,

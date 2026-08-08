@@ -513,14 +513,14 @@ def test_custom_recruitment_event_requires_and_displays_its_custom_title() -> No
     assert invalid_edit.status_code == 200
     assert b"Enter a title for a custom event." in invalid_edit.content
     assert event.custom_title == "Send portfolio follow-up"
-    assert b"Send portfolio follow-up" in client.get(
-        reverse("application_detail", args=[application.pk])
-    ).content
+    assert (
+        b"Send portfolio follow-up"
+        in client.get(reverse("application_detail", args=[application.pk])).content
+    )
 
 
 @pytest.mark.django_db
-def test_dashboard_shows_only_upcoming_scheduled_events_in_candidate_time_and_application_order(
-) -> None:
+def test_dashboard_shows_upcoming_events_in_candidate_time_and_order() -> None:
     account = verified_candidate("dashboard-events@example.com")
     account.candidate_profile.timezone = "America/New_York"
     account.candidate_profile.save(update_fields=["timezone"])
@@ -745,3 +745,112 @@ def test_stage_transitions_and_progress_are_scoped_to_the_authenticated_candidat
     assert b"Private role" not in dashboard.content
     application.refresh_from_db()
     assert application.stage == JobApplication.Stage.DRAFT
+
+
+@pytest.mark.django_db
+def test_confirmed_deletion_cascades_and_recalculates_progress() -> None:
+    account = verified_candidate("delete-candidate@example.com")
+    campaign = Campaign.objects.get(account=account)
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    transition_application(
+        account=account,
+        application_id=application.pk,
+        stage=JobApplication.Stage.SUBMITTED,
+    )
+    RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.INTERVIEW,
+        scheduled_at=datetime(2030, 5, 1, 15, 0, tzinfo=UTC),
+    )
+    client = Client()
+    client.force_login(account)
+
+    confirmation = client.get(reverse("application_delete", args=[application.pk]))
+    cancelled = client.post(
+        reverse("application_delete", args=[application.pk]),
+        {"cancel": "1"},
+    )
+    deleted = client.post(
+        reverse("application_delete", args=[application.pk]),
+        {"confirm": "1"},
+        headers={"HX-Request": "true"},
+    )
+    dashboard = client.get(reverse("dashboard"))
+
+    assert confirmation.status_code == 200
+    assert b"permanently delete" in confirmation.content
+    assert b"cannot be undone" in confirmation.content
+    assert b"Campaign Progress" in confirmation.content
+    assert b"remove its first submission" in confirmation.content
+    assert cancelled.status_code == 302
+    assert cancelled.headers["Location"] == reverse("application_detail", args=[application.pk])
+    assert deleted.status_code == 200
+    assert deleted.headers["HX-Redirect"] == reverse("dashboard")
+    assert not JobApplication.objects.filter(pk=application.pk).exists()
+    assert not StageTransition.objects.filter(application_id=application.pk).exists()
+    assert not RecruitmentEvent.objects.filter(application_id=application.pk).exists()
+    assert Campaign.objects.filter(pk=campaign.pk).exists()
+    assert Company.objects.filter(pk=company.pk).exists()
+    assert b"0 / 5" in dashboard.content
+    assert b"0 / 20" in dashboard.content
+
+
+@pytest.mark.django_db
+def test_deleting_a_draft_explains_that_progress_is_unchanged() -> None:
+    account = verified_candidate("delete-draft@example.com")
+    campaign = Campaign.objects.get(account=account)
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    client = Client()
+    client.force_login(account)
+
+    confirmation = client.get(reverse("application_delete", args=[application.pk]))
+    deleted = client.post(
+        reverse("application_delete", args=[application.pk]),
+        {"confirm": "1"},
+    )
+
+    assert confirmation.status_code == 200
+    assert b"does not contribute to Campaign Progress" in confirmation.content
+    assert deleted.status_code == 302
+    assert deleted.headers["Location"] == reverse("dashboard")
+    assert not JobApplication.objects.filter(pk=application.pk).exists()
+
+
+@pytest.mark.django_db
+def test_application_deletion_is_scoped_to_the_authenticated_candidate() -> None:
+    owner = verified_candidate("delete-owner@example.com")
+    intruder = verified_candidate("delete-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private role",
+        job_description="Private job description.",
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    confirmation = client.get(reverse("application_delete", args=[application.pk]))
+    attempted_delete = client.post(
+        reverse("application_delete", args=[application.pk]),
+        {"confirm": "1"},
+    )
+
+    assert confirmation.status_code == 404
+    assert attempted_delete.status_code == 404
+    assert JobApplication.objects.filter(pk=application.pk).exists()

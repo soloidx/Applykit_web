@@ -106,6 +106,64 @@ def test_candidate_can_update_stage_and_see_history_and_progress_in_browser(
 
 
 @pytest.mark.django_db
+def test_candidate_can_cancel_and_confirm_application_deletion_with_progress_warning_in_browser(
+    page, live_server
+) -> None:
+    account = Account.objects.create_user("delete-browser@example.com", "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Browser Candidate",
+        timezone="America/New_York",
+    )
+    campaign = Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="America/New_York",
+    )
+    company = Company.objects.create(name="Example Careers")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill("delete-browser@example.com")
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.goto(f"{live_server.url}{reverse('application_detail', args=[application.pk])}")
+    page.get_by_label("Stage").select_option(JobApplication.Stage.SUBMITTED)
+    page.get_by_role("button", name="Update stage").click()
+    page.get_by_role("link", name="Delete application").click()
+
+    assert page.get_by_text("Permanent deletion").is_visible()
+    assert (
+        page.get_by_role("alert")
+        .get_by_text("This application contributes to Campaign Progress.")
+        .is_visible()
+    )
+    page.get_by_role("button", name="Cancel").click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+    assert page.get_by_role("heading", name="Platform engineer").is_visible()
+
+    page.get_by_role("link", name="Delete application").click()
+    page.get_by_role("button", name="Delete permanently").click()
+    page.wait_for_url(f"**{reverse('dashboard')}")
+
+    assert page.get_by_text("0 / 5").is_visible()
+    assert page.get_by_text("0 / 20").is_visible()
+
+
+@pytest.mark.django_db
 def test_candidate_can_schedule_complete_and_follow_a_recruitment_event_in_browser(
     page, live_server
 ) -> None:
