@@ -6,6 +6,7 @@ from django.shortcuts import redirect, render
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
+from apps.campaigns.views import dashboard_context
 from apps.profiles.access import minimum_profile_complete
 
 
@@ -18,6 +19,7 @@ def home(request: HttpRequest) -> HttpResponse:
 @login_required
 @verified_account_required
 def dashboard(request: HttpRequest) -> HttpResponse:
-    if not minimum_profile_complete(cast(Account, request.user)):
+    account = cast(Account, request.user)
+    if not minimum_profile_complete(account):
         return redirect("profile")
-    return render(request, "core/dashboard.html")
+    return render(request, "core/dashboard.html", dashboard_context(account))
