@@ -258,6 +258,14 @@ def test_experience_current_role_and_date_validation_are_consistent() -> None:
     assert b"End date must be on or after the start date" in invalid_response.content
     assert not Experience.objects.exists()
 
+    missing_location_response = client.post(
+        reverse("experience_create"),
+        experience_data(location=""),
+    )
+    assert missing_location_response.status_code == 200
+    assert b"This field is required." in missing_location_response.content
+    assert not Experience.objects.exists()
+
     current_response = client.post(
         reverse("experience_create"),
         experience_data(end_date=""),

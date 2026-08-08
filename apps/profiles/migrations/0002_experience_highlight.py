@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
                 ),
                 ("role", models.CharField(max_length=200)),
                 ("organization", models.CharField(max_length=200)),
-                ("location", models.CharField(blank=True, max_length=200)),
+                ("location", models.CharField(max_length=200)),
                 ("start_date", models.DateField()),
                 ("end_date", models.DateField(blank=True, null=True)),
                 ("description", models.TextField(blank=True)),
