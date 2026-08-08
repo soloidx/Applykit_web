@@ -1,0 +1,15 @@
+<div id="highlight-form-{{ highlight_experience.pk }}">
+  <div class="flex items-center justify-between gap-4">
+    <h3 class="text-sm font-semibold text-ink">{% if highlight_form.instance.pk %}Edit highlight{% else %}Add highlight{% endif %}</h3>
+    {% if highlight_form.instance.pk %}<a class="text-sm font-semibold text-coral hover:text-ink" href="{% url 'profile' %}">Cancel</a>{% endif %}
+  </div>
+  <form method="post" action="{{ highlight_form_action }}" class="mt-4" hx-post="{{ highlight_form_action }}" hx-target="#highlight-form-{{ highlight_experience.pk }}" hx-swap="outerHTML">
+    {% csrf_token %}
+    {% for field in highlight_form %}
+    <label class="text-sm font-semibold text-ink" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-coral">*</span>{% endif %}</label>
+    {{ field }}
+    {% for error in field.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+    {% endfor %}
+    <button class="mt-4 rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Save highlight</button>
+  </form>
+</div>

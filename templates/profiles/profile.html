@@ -12,5 +12,92 @@
   <div class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10">
     {% include "profiles/_form.html" %}
   </div>
+  {% if candidate_profile %}
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="experience-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Career history</p>
+        <h2 id="experience-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Experience</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Keep roles and the achievements you want to remember in the order they belong.</p>
+    </div>
+    <div class="mt-8">
+      {% include "profiles/_experience_form.html" %}
+    </div>
+    <div class="mt-10 space-y-6">
+      {% for experience in experiences %}
+      <article class="rounded-3xl border border-ink/10 bg-sand/60 p-5 sm:p-7">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 class="font-display text-2xl font-semibold">{{ experience.role }}</h3>
+            <p class="mt-1 font-semibold text-coral">{{ experience.organization }}</p>
+            <p class="mt-2 text-sm text-ink/60">
+              {{ experience.start_date|date:"M Y" }} - {% if experience.end_date %}{{ experience.end_date|date:"M Y" }}{% else %}Present{% endif %}
+              {% if experience.location %} &middot; {{ experience.location }}{% endif %}
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2 text-sm font-semibold">
+            <a class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" href="{% url 'experience_edit' experience.pk %}">Edit</a>
+            <form method="post" action="{% url 'experience_delete' experience.pk %}">
+              {% csrf_token %}
+              <button class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" type="submit">Remove</button>
+            </form>
+            <form method="post" action="{% url 'experience_reorder' experience.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="up">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ experience.role }} up">&uarr;</button>
+            </form>
+            <form method="post" action="{% url 'experience_reorder' experience.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="down">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ experience.role }} down">&darr;</button>
+            </form>
+          </div>
+        </div>
+        {% if experience.description %}<p class="mt-5 max-w-3xl whitespace-pre-line text-sm leading-7 text-ink/70">{{ experience.description }}</p>{% endif %}
+        <div class="mt-7 border-t border-ink/10 pt-6">
+          <div class="flex items-center justify-between gap-4">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/60">Achievement highlights</h4>
+            <a class="text-sm font-semibold text-coral hover:text-ink" href="{% url 'highlight_create' experience.pk %}">Add highlight</a>
+          </div>
+          {% if experience.highlights.all %}
+          <ul class="mt-4 space-y-3">
+            {% for highlight in experience.highlights.all %}
+            <li class="flex flex-col gap-3 rounded-2xl bg-cream px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+              <p class="text-sm leading-6 text-ink/75">{{ highlight.text }}</p>
+              <div class="flex shrink-0 flex-wrap gap-2 text-xs font-semibold">
+                <a class="text-coral hover:text-ink" href="{% url 'highlight_edit' experience.pk highlight.pk %}">Edit</a>
+                <form method="post" action="{% url 'highlight_delete' experience.pk highlight.pk %}">
+                  {% csrf_token %}
+                  <button class="text-coral hover:text-ink" type="submit">Remove</button>
+                </form>
+                <form method="post" action="{% url 'highlight_reorder' experience.pk highlight.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="direction" value="up">
+                  <button class="text-coral hover:text-ink" type="submit" aria-label="Move highlight up">&uarr;</button>
+                </form>
+                <form method="post" action="{% url 'highlight_reorder' experience.pk highlight.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="direction" value="down">
+                  <button class="text-coral hover:text-ink" type="submit" aria-label="Move highlight down">&darr;</button>
+                </form>
+              </div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="mt-4 text-sm text-ink/55">No highlights yet.</p>
+          {% endif %}
+          {% if highlight_experience.pk == experience.pk %}
+          <div class="mt-5">{% include "profiles/_highlight_form.html" %}</div>
+          {% endif %}
+        </div>
+      </article>
+      {% empty %}
+      <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add your first role when you are ready.</p>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 </section>
 {% endblock %}

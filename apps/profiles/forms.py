@@ -4,7 +4,7 @@ from typing import Any
 
 from django import forms
 
-from apps.profiles.models import CandidateProfile, validate_iana_timezone
+from apps.profiles.models import CandidateProfile, Experience, Highlight, validate_iana_timezone
 
 
 class CandidateProfileForm(forms.ModelForm):
@@ -57,3 +57,57 @@ class CandidateProfileForm(forms.ModelForm):
         timezone = self.cleaned_data["timezone"].strip()
         validate_iana_timezone(timezone)
         return timezone
+
+
+class ExperienceForm(forms.ModelForm):
+    class Meta:
+        model = Experience
+        fields = [
+            "role",
+            "organization",
+            "location",
+            "start_date",
+            "end_date",
+            "description",
+        ]
+        labels = {
+            "role": "Role",
+            "organization": "Organization",
+            "location": "Location",
+            "start_date": "Start date",
+            "end_date": "End date",
+            "description": "Description",
+        }
+        help_texts = {
+            "end_date": "Leave blank if this is your current role.",
+        }
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+            "description": forms.Textarea(attrs={"rows": 4}),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+                "text-ink outline-none transition placeholder:text-ink/35 "
+                "focus:border-coral focus:ring-2 focus:ring-coral/20"
+            )
+
+
+class HighlightForm(forms.ModelForm):
+    class Meta:
+        model = Highlight
+        fields = ["text"]
+        labels = {"text": "Achievement highlight"}
+        widgets = {"text": forms.Textarea(attrs={"rows": 3})}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["text"].widget.attrs["class"] = (
+            "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+            "text-ink outline-none transition placeholder:text-ink/35 "
+            "focus:border-coral focus:ring-2 focus:ring-coral/20"
+        )
