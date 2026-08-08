@@ -1,10 +1,11 @@
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 from publicsuffix2 import get_sld
 
-from apps.applications.models import Company
+from apps.applications.models import Company, CompanyDomainAlias, JobApplication
 
 
 def normalized_registrable_domain(website: str) -> str:
@@ -44,3 +45,38 @@ def create_or_reuse_company(name: str, website: str | None = None) -> tuple[Comp
         canonical_domain=domain,
         defaults={"name": company_name},
     )
+
+
+def merge_companies(*, survivor: Company, duplicate: Company) -> None:
+    if survivor.pk == duplicate.pk:
+        raise ValidationError("Choose a different company to merge into.")
+
+    with transaction.atomic():
+        companies = {
+            company.pk: company
+            for company in Company.objects.select_for_update().filter(
+                pk__in=[survivor.pk, duplicate.pk]
+            )
+        }
+        locked_survivor = companies[survivor.pk]
+        locked_duplicate = companies[duplicate.pk]
+        duplicate_domains = list(
+            CompanyDomainAlias.objects.filter(company=locked_duplicate).values_list(
+                "domain", flat=True
+            )
+        )
+        if locked_duplicate.canonical_domain:
+            duplicate_domains.append(locked_duplicate.canonical_domain)
+
+        JobApplication.objects.filter(company=locked_duplicate).update(company=locked_survivor)
+        CompanyDomainAlias.objects.filter(company=locked_duplicate).delete()
+        locked_duplicate.delete()
+        existing_domains = set(
+            CompanyDomainAlias.objects.filter(company=locked_survivor).values_list(
+                "domain", flat=True
+            )
+        )
+        for domain in duplicate_domains:
+            if domain != locked_survivor.canonical_domain and domain not in existing_domains:
+                CompanyDomainAlias.objects.create(company=locked_survivor, domain=domain)
+                existing_domains.add(domain)
