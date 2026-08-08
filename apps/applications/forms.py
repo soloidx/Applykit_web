@@ -49,3 +49,7 @@ class JobApplicationEditForm(forms.ModelForm):
             "source",
             "private_notes",
         ]
+
+
+class ApplicationStageForm(forms.Form):
+    stage = forms.ChoiceField(choices=JobApplication.Stage.choices, label="Stage")

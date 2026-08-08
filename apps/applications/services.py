@@ -3,9 +3,11 @@ from urllib.parse import urlsplit
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from publicsuffix2 import get_sld
 
-from apps.applications.models import Company, CompanyDomainAlias, JobApplication
+from apps.accounts.models import Account
+from apps.applications.models import Company, CompanyDomainAlias, JobApplication, StageTransition
 
 
 def normalized_registrable_domain(website: str) -> str:
@@ -80,3 +82,30 @@ def merge_companies(*, survivor: Company, duplicate: Company) -> None:
             if domain != locked_survivor.canonical_domain and domain not in existing_domains:
                 CompanyDomainAlias.objects.create(company=locked_survivor, domain=domain)
                 existing_domains.add(domain)
+
+
+@transaction.atomic
+def transition_application(*, account: Account, application_id: int, stage: str) -> JobApplication:
+    try:
+        target_stage = JobApplication.Stage(stage)
+    except ValueError as error:
+        raise ValidationError("Choose a supported application stage.") from error
+
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
+    )
+    if application.stage == target_stage:
+        raise ValidationError("Choose a different application stage.")
+
+    previous_stage = application.stage
+    if target_stage == JobApplication.Stage.SUBMITTED and application.first_submitted_at is None:
+        application.first_submitted_at = timezone.now()
+    StageTransition.objects.create(
+        application=application,
+        from_stage=previous_stage,
+        to_stage=target_stage,
+    )
+    application.stage = target_stage
+    application.save(update_fields=["stage", "first_submitted_at", "updated_at"])
+    return application

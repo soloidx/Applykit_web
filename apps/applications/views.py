@@ -11,9 +11,13 @@ from django.urls import reverse
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
-from apps.applications.forms import JobApplicationCreateForm, JobApplicationEditForm
+from apps.applications.forms import (
+    ApplicationStageForm,
+    JobApplicationCreateForm,
+    JobApplicationEditForm,
+)
 from apps.applications.models import Company, JobApplication
-from apps.applications.services import create_or_reuse_company
+from apps.applications.services import create_or_reuse_company, transition_application
 from apps.campaigns.models import Campaign
 
 
@@ -106,3 +110,45 @@ def application_edit(request: HttpRequest, application_id: int) -> HttpResponse:
         form.save()
         return _redirect_or_htmx_redirect(request, application)
     return render(request, "applications/form.html", {"form": form, "application": application})
+
+
+@login_required
+@verified_account_required
+def application_detail(request: HttpRequest, application_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(
+        JobApplication.objects.prefetch_related("stage_transitions"),
+        pk=application_id,
+        account=account,
+    )
+    stage_form = ApplicationStageForm(
+        request.POST or None,
+        initial={"stage": application.stage},
+    )
+    if request.method == "POST":
+        if stage_form.is_valid():
+            try:
+                transition_application(
+                    account=account,
+                    application_id=application.pk,
+                    stage=str(stage_form.cleaned_data["stage"]),
+                )
+            except ValidationError as error:
+                stage_form.add_error("stage", error)
+            else:
+                if _is_htmx(request):
+                    response = HttpResponse(status=200)
+                    response["HX-Redirect"] = reverse("application_detail", args=[application.pk])
+                    return response
+                return redirect("application_detail", application_id=application.pk)
+        else:
+            return render(
+                request,
+                "applications/detail.html",
+                {"application": application, "stage_form": stage_form},
+            )
+    elif request.method != "GET":
+        return HttpResponse(status=405)
+    return render(
+        request, "applications/detail.html", {"application": application, "stage_form": stage_form}
+    )

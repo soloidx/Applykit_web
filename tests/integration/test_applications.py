@@ -4,8 +4,8 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.applications.models import Company, CompanyDomainAlias, JobApplication
-from apps.applications.services import create_or_reuse_company
+from apps.applications.models import Company, CompanyDomainAlias, JobApplication, StageTransition
+from apps.applications.services import create_or_reuse_company, transition_application
 from apps.campaigns.models import Campaign
 from apps.profiles.models import CandidateProfile
 
@@ -411,3 +411,110 @@ def test_candidate_cannot_change_a_company_identity_through_draft_edit_fields() 
     company.refresh_from_db()
     assert application.company == company
     assert company.canonical_domain == "example.com"
+
+
+@pytest.mark.django_db
+def test_candidate_can_make_flexible_stage_transitions_and_view_append_only_history() -> None:
+    account = verified_candidate("stage-candidate@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    client = Client()
+    client.force_login(account)
+
+    submitted = client.post(
+        reverse("application_detail", args=[application.pk]),
+        {"stage": JobApplication.Stage.SUBMITTED},
+    )
+    application.refresh_from_db()
+    first_submission = application.first_submitted_at
+    accepted = client.post(
+        reverse("application_detail", args=[application.pk]),
+        {"stage": JobApplication.Stage.ACCEPTED},
+    )
+    corrected = client.post(
+        reverse("application_detail", args=[application.pk]),
+        {"stage": JobApplication.Stage.INTERVIEWING},
+    )
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert submitted.status_code == 302
+    assert accepted.status_code == 302
+    assert corrected.status_code == 302
+    application.refresh_from_db()
+    assert application.stage == JobApplication.Stage.INTERVIEWING
+    assert application.first_submitted_at == first_submission
+    assert first_submission is not None
+    assert list(application.stage_transitions.values_list("from_stage", "to_stage")) == [
+        (JobApplication.Stage.DRAFT, JobApplication.Stage.SUBMITTED),
+        (JobApplication.Stage.SUBMITTED, JobApplication.Stage.ACCEPTED),
+        (JobApplication.Stage.ACCEPTED, JobApplication.Stage.INTERVIEWING),
+    ]
+    assert detail.status_code == 200
+    assert b"Stage history" in detail.content
+    assert b"Submitted" in detail.content
+    assert b"Accepted" in detail.content
+
+
+@pytest.mark.django_db
+def test_stage_transition_rolls_back_current_stage_and_submission_time_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = verified_candidate("atomic-stage@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+
+    def fail_transition_creation(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("Transition persistence failed")
+
+    monkeypatch.setattr(StageTransition.objects, "create", fail_transition_creation)
+
+    with pytest.raises(RuntimeError):
+        transition_application(
+            account=account,
+            application_id=application.pk,
+            stage=JobApplication.Stage.SUBMITTED,
+        )
+
+    application.refresh_from_db()
+    assert application.stage == JobApplication.Stage.DRAFT
+    assert application.first_submitted_at is None
+    assert not application.stage_transitions.exists()
+
+
+@pytest.mark.django_db
+def test_stage_transitions_and_progress_are_scoped_to_the_authenticated_candidate() -> None:
+    owner = verified_candidate("stage-owner@example.com")
+    intruder = verified_candidate("stage-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private role",
+        job_description="Private job description.",
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    response = client.post(
+        reverse("application_detail", args=[application.pk]),
+        {"stage": JobApplication.Stage.SUBMITTED},
+    )
+    dashboard = client.get(reverse("dashboard"))
+
+    assert response.status_code == 404
+    assert b"Private role" not in dashboard.content
+    application.refresh_from_db()
+    assert application.stage == JobApplication.Stage.DRAFT

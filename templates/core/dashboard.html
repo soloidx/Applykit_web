@@ -27,12 +27,12 @@
       <div class="mt-8 grid gap-4 sm:grid-cols-2">
        <div class="rounded-2xl bg-sand p-5">
          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/50">This week</p>
-         <p class="mt-2 font-display text-3xl font-semibold">0 / {{ active_campaign.weekly_target }}</p>
+          <p class="mt-2 font-display text-3xl font-semibold">{{ campaign_progress.submitted_this_week }} / {{ active_campaign.weekly_target }}</p>
       </div>
       <a class="mt-8 inline-block rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" href="{% url 'application_create' %}">Add a draft application</a>
        <div class="rounded-2xl bg-sand p-5">
          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/50">This month</p>
-         <p class="mt-2 font-display text-3xl font-semibold">0 / {{ active_campaign.monthly_target }}</p>
+        <p class="mt-2 font-display text-3xl font-semibold">{{ campaign_progress.submitted_this_month }} / {{ active_campaign.monthly_target }}</p>
        </div>
      </div>
      {% else %}

@@ -53,8 +53,28 @@ class JobApplication(models.Model):
     source = models.CharField(max_length=255, blank=True)
     private_notes = models.TextField(blank=True)
     stage = models.CharField(max_length=16, choices=Stage.choices, default=Stage.DRAFT)
+    first_submitted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"{self.role_title} at {self.company}"
+
+
+class StageTransition(models.Model):
+    application = models.ForeignKey(
+        JobApplication,
+        on_delete=models.CASCADE,
+        related_name="stage_transitions",
+    )
+    from_stage = models.CharField(max_length=16, choices=JobApplication.Stage.choices)
+    to_stage = models.CharField(max_length=16, choices=JobApplication.Stage.choices)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["occurred_at", "pk"]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.application}: {self.get_from_stage_display()} to {self.get_to_stage_display()}"
+        )

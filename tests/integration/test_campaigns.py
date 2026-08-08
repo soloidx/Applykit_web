@@ -5,6 +5,8 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
+from apps.applications.models import Company, JobApplication
+from apps.applications.services import transition_application
 from apps.campaigns.models import Campaign
 from apps.profiles.models import CandidateProfile
 
@@ -137,3 +139,47 @@ def test_campaign_constraints_allow_only_one_active_campaign_and_keep_timezone_s
 
     first.refresh_from_db()
     assert first.timezone == "Europe/London"
+
+
+@pytest.mark.django_db
+def test_dashboard_progress_counts_submissions_beyond_submitted_but_not_drafts() -> None:
+    account = verified_candidate("progress@example.com")
+    campaign = Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="Europe/London",
+    )
+    company = Company.objects.create(name="Example")
+    submitted = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=company,
+        role_title="Submitted role",
+        job_description="Description",
+    )
+    JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=company,
+        role_title="Draft role",
+        job_description="Description",
+    )
+    transition_application(
+        account=account,
+        application_id=submitted.pk,
+        stage=JobApplication.Stage.SUBMITTED,
+    )
+    transition_application(
+        account=account,
+        application_id=submitted.pk,
+        stage=JobApplication.Stage.ACCEPTED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    dashboard = client.get(reverse("dashboard"))
+
+    assert dashboard.status_code == 200
+    assert b"1 / 5" in dashboard.content
+    assert b"1 / 20" in dashboard.content

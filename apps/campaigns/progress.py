@@ -2,6 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from django.utils import timezone
+
+from apps.accounts.models import Account
+from apps.applications.models import JobApplication
+from apps.campaigns.models import Campaign
+
 
 @dataclass(frozen=True)
 class CampaignPeriods:
@@ -9,6 +15,12 @@ class CampaignPeriods:
     week_end: datetime
     month_start: datetime
     month_end: datetime
+
+
+@dataclass(frozen=True)
+class CampaignProgress:
+    submitted_this_week: int
+    submitted_this_month: int
 
 
 def campaign_periods(now: datetime, timezone_name: str) -> CampaignPeriods:
@@ -27,4 +39,27 @@ def campaign_periods(now: datetime, timezone_name: str) -> CampaignPeriods:
         week_end=week_start + timedelta(days=7),
         month_start=datetime.combine(month_start_date, time.min, timezone),
         month_end=datetime.combine(next_month_start_date, time.min, timezone),
+    )
+
+
+def campaign_progress(
+    account: Account,
+    campaign: Campaign,
+    now: datetime | None = None,
+) -> CampaignProgress:
+    periods = campaign_periods(now or timezone.now(), campaign.timezone)
+    applications = JobApplication.objects.filter(
+        account=account,
+        campaign=campaign,
+        first_submitted_at__isnull=False,
+    )
+    return CampaignProgress(
+        submitted_this_week=applications.filter(
+            first_submitted_at__gte=periods.week_start,
+            first_submitted_at__lt=periods.week_end,
+        ).count(),
+        submitted_this_month=applications.filter(
+            first_submitted_at__gte=periods.month_start,
+            first_submitted_at__lt=periods.month_end,
+        ).count(),
     )

@@ -11,6 +11,7 @@ from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
 from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import Campaign
+from apps.campaigns.progress import campaign_progress
 from apps.campaigns.services import activate_campaign
 from apps.profiles.access import minimum_profile_complete
 
@@ -28,10 +29,14 @@ def _redirect_or_htmx_redirect(request: HttpRequest) -> HttpResponse:
 
 
 def dashboard_context(account: Account, form: CampaignForm | None = None) -> dict[str, object]:
+    active_campaign = Campaign.objects.filter(
+        account=account, status=Campaign.Status.ACTIVE
+    ).first()
     return {
-        "active_campaign": Campaign.objects.filter(
-            account=account, status=Campaign.Status.ACTIVE
-        ).first(),
+        "active_campaign": active_campaign,
+        "campaign_progress": campaign_progress(account, active_campaign)
+        if active_campaign
+        else None,
         "campaign_form": form or CampaignForm(),
     }
 
