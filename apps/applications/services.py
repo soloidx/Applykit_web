@@ -40,4 +40,7 @@ def create_or_reuse_company(name: str, website: str | None = None) -> tuple[Comp
     )
     if existing:
         return existing, False
-    return Company.objects.create(name=company_name, canonical_domain=domain), True
+    return Company.objects.get_or_create(
+        canonical_domain=domain,
+        defaults={"name": company_name},
+    )

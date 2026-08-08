@@ -159,12 +159,13 @@ def test_draft_validation_and_edits_are_scoped_to_the_authenticated_candidate() 
 def test_candidate_can_search_shared_companies_by_public_identity() -> None:
     account = verified_candidate("candidate@example.com")
     create_or_reuse_company("Example Careers", "jobs.example.com")
-    create_or_reuse_company("Other Company", "other.example.org")
+    other, _ = create_or_reuse_company("Other Company", "other.example.org")
+    other.domain_aliases.create(domain="other.co.uk")
     client = Client()
     client.force_login(account)
 
-    response = client.get(reverse("application_create"), {"q": "example.com"})
+    response = client.get(reverse("application_create"), {"q": "other.co.uk"})
 
     assert response.status_code == 200
-    assert b"Example Careers" in response.content
-    assert b"Other Company" not in response.content
+    assert b"Other Company" in response.content
+    assert b"Example Careers" not in response.content

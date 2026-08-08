@@ -41,7 +41,9 @@ def application_create(request: HttpRequest) -> HttpResponse:
         if query:
             company_field = cast(forms.ModelChoiceField, form.fields["company"])
             company_field.queryset = Company.objects.filter(
-                Q(name__icontains=query) | Q(canonical_domain__icontains=query)
+                Q(name__icontains=query)
+                | Q(canonical_domain__icontains=query)
+                | Q(domain_aliases__domain__icontains=query)
             ).order_by("name")
         return render(request, "applications/form.html", {"form": form, "company_query": query})
     if request.method != "POST":
@@ -84,7 +86,12 @@ def application_create(request: HttpRequest) -> HttpResponse:
 @verified_account_required
 def application_edit(request: HttpRequest, application_id: int) -> HttpResponse:
     account = cast(Account, request.user)
-    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    application = get_object_or_404(
+        JobApplication,
+        pk=application_id,
+        account=account,
+        stage=JobApplication.Stage.DRAFT,
+    )
     if request.method == "GET":
         return render(
             request,
