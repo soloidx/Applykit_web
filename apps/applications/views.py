@@ -1,4 +1,5 @@
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from django import forms
 from django.contrib import messages
@@ -8,6 +9,7 @@ from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
@@ -15,10 +17,17 @@ from apps.applications.forms import (
     ApplicationStageForm,
     JobApplicationCreateForm,
     JobApplicationEditForm,
+    RecruitmentEventForm,
 )
-from apps.applications.models import Company, JobApplication
-from apps.applications.services import create_or_reuse_company, transition_application
+from apps.applications.models import Company, JobApplication, RecruitmentEvent
+from apps.applications.services import (
+    create_or_reuse_company,
+    create_recruitment_event,
+    transition_application,
+    update_recruitment_event,
+)
 from apps.campaigns.models import Campaign
+from apps.profiles.models import CandidateProfile
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -145,10 +154,121 @@ def application_detail(request: HttpRequest, application_id: int) -> HttpRespons
             return render(
                 request,
                 "applications/detail.html",
-                {"application": application, "stage_form": stage_form},
+                _application_detail_context(account, application, stage_form=stage_form),
             )
     elif request.method != "GET":
         return HttpResponse(status=405)
     return render(
-        request, "applications/detail.html", {"application": application, "stage_form": stage_form}
+        request,
+        "applications/detail.html",
+        _application_detail_context(account, application, stage_form=stage_form),
+    )
+
+
+def _application_detail_context(
+    account: Account,
+    application: JobApplication,
+    *,
+    stage_form: ApplicationStageForm | None = None,
+    event_form: RecruitmentEventForm | None = None,
+    event_forms: dict[int, RecruitmentEventForm] | None = None,
+) -> dict[str, object]:
+    timezone_name = CandidateProfile.objects.get(account=account).timezone
+    candidate_timezone = ZoneInfo(timezone_name)
+    events = list(application.recruitment_events.all())
+    for event in events:
+        event.display_scheduled_at = timezone.localtime(
+            event.scheduled_at,
+            candidate_timezone,
+        ).replace(tzinfo=None)
+        if event_forms and event.pk in event_forms:
+            event.form = event_forms[event.pk]
+        elif event.status == RecruitmentEvent.Status.SCHEDULED and not hasattr(event, "form"):
+            event.form = RecruitmentEventForm(
+                timezone_name=timezone_name,
+                instance=event,
+            )
+    return {
+        "application": application,
+        "stage_form": stage_form or ApplicationStageForm(initial={"stage": application.stage}),
+        "event_form": event_form or RecruitmentEventForm(timezone_name=timezone_name),
+        "recruitment_events": events,
+        "candidate_timezone": timezone_name,
+    }
+
+
+def _event_redirect(request: HttpRequest, application: JobApplication) -> HttpResponse:
+    destination = reverse("application_detail", args=[application.pk])
+    if _is_htmx(request):
+        response = HttpResponse(status=200)
+        response["HX-Redirect"] = destination
+        return response
+    return redirect(destination)
+
+
+@login_required
+@verified_account_required
+def recruitment_event_create(request: HttpRequest, application_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    timezone_name = CandidateProfile.objects.get(account=account).timezone
+    form = RecruitmentEventForm(request.POST, timezone_name=timezone_name)
+    if form.is_valid():
+        create_recruitment_event(
+            account=account,
+            application_id=application.pk,
+            event_type=str(form.cleaned_data["event_type"]),
+            custom_title=str(form.cleaned_data["custom_title"]),
+            scheduled_at=form.cleaned_data["scheduled_at"],
+        )
+        return _event_redirect(request, application)
+    return render(
+        request,
+        "applications/detail.html",
+        _application_detail_context(account, application, event_form=form),
+    )
+
+
+@login_required
+@verified_account_required
+def recruitment_event_edit(
+    request: HttpRequest,
+    application_id: int,
+    event_id: int,
+) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    event = get_object_or_404(
+        RecruitmentEvent,
+        pk=event_id,
+        application=application,
+        status=RecruitmentEvent.Status.SCHEDULED,
+    )
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    form = RecruitmentEventForm(
+        request.POST,
+        instance=event,
+        timezone_name=CandidateProfile.objects.get(account=account).timezone,
+    )
+    if form.is_valid():
+        update_recruitment_event(
+            account=account,
+            application_id=application.pk,
+            event_id=event.pk,
+            event_type=str(form.cleaned_data["event_type"]),
+            custom_title=str(form.cleaned_data["custom_title"]),
+            scheduled_at=form.cleaned_data["scheduled_at"],
+            status=str(form.cleaned_data["status"]),
+        )
+        return _event_redirect(request, application)
+    event.form = form
+    return render(
+        request,
+        "applications/detail.html",
+        _application_detail_context(account, application, event_forms={event.pk: form}),
     )

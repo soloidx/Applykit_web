@@ -7,7 +7,7 @@ from django.core import mail
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.applications.models import Company, JobApplication
+from apps.applications.models import Company, JobApplication, RecruitmentEvent
 from apps.campaigns.models import Campaign
 from apps.profiles.models import CandidateProfile
 
@@ -98,7 +98,67 @@ def test_candidate_can_update_stage_and_see_history_and_progress_in_browser(
 
     assert page.get_by_text("Submitted", exact=True).first.is_visible()
     assert page.get_by_text("Draft to Submitted").is_visible()
-    page.goto(f"{live_server.url}{reverse('dashboard')}")
+    page.get_by_role("link", name="Back to workspace").click()
+    page.wait_for_url(f"**{reverse('dashboard')}")
 
     assert page.get_by_text("1 / 5").is_visible()
     assert page.get_by_text("1 / 20").is_visible()
+
+
+@pytest.mark.django_db
+def test_candidate_can_schedule_complete_and_follow_a_recruitment_event_in_browser(
+    page, live_server
+) -> None:
+    account = Account.objects.create_user("event-browser@example.com", "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Browser Candidate",
+        timezone="America/New_York",
+    )
+    Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="America/New_York",
+    )
+    company = Company.objects.create(name="Example Careers")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill("event-browser@example.com")
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.goto(f"{live_server.url}{reverse('application_detail', args=[application.pk])}")
+    page.get_by_label("Event type").select_option(RecruitmentEvent.EventType.INTERVIEW)
+    page.get_by_label("Scheduled time (America/New_York)").fill("2030-05-01T10:00")
+    page.get_by_role("button", name="Schedule event").click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    page.get_by_role("link", name="Back to workspace").click()
+    page.wait_for_url(f"**{reverse('dashboard')}")
+    assert page.get_by_role("heading", name="Upcoming recruitment events").is_visible()
+    assert page.get_by_text("May 1, 2030, 10:00 America/New_York").is_visible()
+    page.get_by_text("Interview", exact=True).click()
+    page.get_by_label("Status").select_option(RecruitmentEvent.Status.COMPLETED)
+    page.get_by_role("button", name="Save event").click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+    page.reload()
+
+    assert page.get_by_text("Completed · May 1, 2030, 10:00 America/New_York").is_visible()
+    page.get_by_role("link", name="Back to workspace").click()
+    page.wait_for_url(f"**{reverse('dashboard')}")
+    assert not page.get_by_text("Interview", exact=True).is_visible()

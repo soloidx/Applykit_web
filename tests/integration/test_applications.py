@@ -1,10 +1,20 @@
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 from allauth.account.models import EmailAddress
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import Account
-from apps.applications.models import Company, CompanyDomainAlias, JobApplication, StageTransition
+from apps.applications.models import (
+    Company,
+    CompanyDomainAlias,
+    JobApplication,
+    RecruitmentEvent,
+    StageTransition,
+)
 from apps.applications.services import create_or_reuse_company, transition_application
 from apps.campaigns.models import Campaign
 from apps.profiles.models import CandidateProfile
@@ -379,6 +389,223 @@ def test_candidate_cannot_access_company_administration() -> None:
     assert response.headers["Location"].startswith("/admin/login/")
     company.refresh_from_db()
     assert company.name == "Example"
+
+
+@pytest.mark.django_db
+def test_candidate_can_create_edit_and_complete_recruitment_events_with_htmx_parity() -> None:
+    account = verified_candidate("event-candidate@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    client = Client()
+    client.force_login(account)
+
+    created = client.post(
+        reverse("recruitment_event_create", args=[application.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.INTERVIEW,
+            "custom_title": "",
+            "scheduled_at": "2030-05-01T15:30",
+        },
+    )
+    event = RecruitmentEvent.objects.get()
+    edited = client.post(
+        reverse("recruitment_event_edit", args=[application.pk, event.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.DEADLINE,
+            "custom_title": "",
+            "scheduled_at": "2030-05-02T16:45",
+            "status": RecruitmentEvent.Status.COMPLETED,
+        },
+        headers={"HX-Request": "true"},
+    )
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert created.status_code == 302
+    assert event.event_type == RecruitmentEvent.EventType.INTERVIEW
+    assert event.status == RecruitmentEvent.Status.SCHEDULED
+    assert event.scheduled_at.astimezone(ZoneInfo("Europe/London")).hour == 15
+    assert edited.status_code == 200
+    assert edited.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
+    event.refresh_from_db()
+    assert event.event_type == RecruitmentEvent.EventType.DEADLINE
+    assert event.status == RecruitmentEvent.Status.COMPLETED
+    assert detail.status_code == 200
+    assert b"Deadline" in detail.content
+    assert b"Completed" in detail.content
+
+    cancelled = client.post(
+        reverse("recruitment_event_create", args=[application.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.FOLLOW_UP,
+            "custom_title": "",
+            "scheduled_at": "2030-05-03T16:45",
+        },
+    )
+    cancelled_event = RecruitmentEvent.objects.exclude(pk=event.pk).get()
+    cancellation = client.post(
+        reverse(
+            "recruitment_event_edit",
+            args=[application.pk, cancelled_event.pk],
+        ),
+        {
+            "event_type": RecruitmentEvent.EventType.FOLLOW_UP,
+            "custom_title": "",
+            "scheduled_at": "2030-05-03T16:45",
+            "status": RecruitmentEvent.Status.CANCELLED,
+        },
+    )
+
+    assert cancelled.status_code == 302
+    assert cancellation.status_code == 302
+    assert b"Cancelled" in client.get(reverse("application_detail", args=[application.pk])).content
+
+
+@pytest.mark.django_db
+def test_custom_recruitment_event_requires_and_displays_its_custom_title() -> None:
+    account = verified_candidate("custom-event@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    client = Client()
+    client.force_login(account)
+
+    invalid = client.post(
+        reverse("recruitment_event_create", args=[application.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.CUSTOM,
+            "custom_title": "",
+            "scheduled_at": "2030-05-01T15:30",
+        },
+    )
+    valid = client.post(
+        reverse("recruitment_event_create", args=[application.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.CUSTOM,
+            "custom_title": "Send portfolio follow-up",
+            "scheduled_at": "2030-05-01T15:30",
+        },
+    )
+    event = RecruitmentEvent.objects.get()
+    invalid_edit = client.post(
+        reverse("recruitment_event_edit", args=[application.pk, event.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.CUSTOM,
+            "custom_title": "",
+            "scheduled_at": "2030-05-01T15:30",
+            "status": RecruitmentEvent.Status.SCHEDULED,
+        },
+    )
+
+    assert invalid.status_code == 200
+    assert b"Enter a title for a custom event." in invalid.content
+    assert valid.status_code == 302
+    assert invalid_edit.status_code == 200
+    assert b"Enter a title for a custom event." in invalid_edit.content
+    assert event.custom_title == "Send portfolio follow-up"
+    assert b"Send portfolio follow-up" in client.get(
+        reverse("application_detail", args=[application.pk])
+    ).content
+
+
+@pytest.mark.django_db
+def test_dashboard_shows_only_upcoming_scheduled_events_in_candidate_time_and_application_order(
+) -> None:
+    account = verified_candidate("dashboard-events@example.com")
+    account.candidate_profile.timezone = "America/New_York"
+    account.candidate_profile.save(update_fields=["timezone"])
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.INTERVIEW,
+        scheduled_at=datetime(2030, 5, 1, 15, 0, tzinfo=UTC),
+    )
+    RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.FOLLOW_UP,
+        scheduled_at=datetime(2030, 5, 1, 14, 0, tzinfo=UTC),
+    )
+    RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.ASSESSMENT,
+        status=RecruitmentEvent.Status.COMPLETED,
+        scheduled_at=datetime(2030, 5, 1, 13, 0, tzinfo=UTC),
+    )
+    RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.DEADLINE,
+        scheduled_at=timezone.now() - timedelta(days=1),
+    )
+    client = Client()
+    client.force_login(account)
+
+    dashboard = client.get(reverse("dashboard"))
+    content = dashboard.content
+
+    assert dashboard.status_code == 200
+    assert b"Upcoming recruitment events" in content
+    assert b"Interview" in content
+    assert b"Follow-up" in content
+    assert b"Assessment" not in content
+    assert content.index(b"Follow-up") < content.index(b"Interview")
+    assert b"May 1, 2030, 10:00" in content
+    assert b"May 1, 2030, 11:00" in content
+    assert reverse("application_detail", args=[application.pk]).encode() in content
+
+
+@pytest.mark.django_db
+def test_recruitment_events_are_scoped_to_the_authenticated_candidate() -> None:
+    owner = verified_candidate("event-owner@example.com")
+    intruder = verified_candidate("event-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private role",
+        job_description="Private job description.",
+    )
+    event = RecruitmentEvent.objects.create(
+        application=application,
+        event_type=RecruitmentEvent.EventType.CUSTOM,
+        custom_title="Private event",
+        scheduled_at=datetime(2030, 5, 1, 15, 0, tzinfo=UTC),
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    dashboard = client.get(reverse("dashboard"))
+    edit = client.post(
+        reverse("recruitment_event_edit", args=[application.pk, event.pk]),
+        {
+            "event_type": RecruitmentEvent.EventType.CUSTOM,
+            "custom_title": "Changed",
+            "scheduled_at": "2030-05-02T15:30",
+            "status": RecruitmentEvent.Status.CANCELLED,
+        },
+    )
+
+    assert b"Private event" not in dashboard.content
+    assert edit.status_code == 404
+    event.refresh_from_db()
+    assert event.custom_title == "Private event"
     assert company.canonical_domain == "example.com"
 
 

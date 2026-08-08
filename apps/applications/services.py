@@ -1,3 +1,4 @@
+from datetime import datetime
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
@@ -7,7 +8,13 @@ from django.utils import timezone
 from publicsuffix2 import get_sld
 
 from apps.accounts.models import Account
-from apps.applications.models import Company, CompanyDomainAlias, JobApplication, StageTransition
+from apps.applications.models import (
+    Company,
+    CompanyDomainAlias,
+    JobApplication,
+    RecruitmentEvent,
+    StageTransition,
+)
 
 
 def normalized_registrable_domain(website: str) -> str:
@@ -109,3 +116,50 @@ def transition_application(*, account: Account, application_id: int, stage: str)
     application.stage = target_stage
     application.save(update_fields=["stage", "first_submitted_at", "updated_at"])
     return application
+
+
+@transaction.atomic
+def create_recruitment_event(
+    *,
+    account: Account,
+    application_id: int,
+    event_type: str,
+    scheduled_at: datetime,
+    custom_title: str = "",
+) -> RecruitmentEvent:
+    application = JobApplication.objects.get(pk=application_id, account=account)
+    event = RecruitmentEvent(
+        application=application,
+        event_type=event_type,
+        custom_title=custom_title,
+        scheduled_at=scheduled_at,
+    )
+    event.full_clean()
+    event.save()
+    return event
+
+
+@transaction.atomic
+def update_recruitment_event(
+    *,
+    account: Account,
+    application_id: int,
+    event_id: int,
+    event_type: str,
+    scheduled_at: datetime,
+    status: str,
+    custom_title: str = "",
+) -> RecruitmentEvent:
+    event = RecruitmentEvent.objects.select_for_update().get(
+        pk=event_id,
+        application_id=application_id,
+        application__account=account,
+        status=RecruitmentEvent.Status.SCHEDULED,
+    )
+    event.event_type = event_type
+    event.custom_title = custom_title
+    event.scheduled_at = scheduled_at
+    event.status = status
+    event.full_clean()
+    event.save(update_fields=["event_type", "custom_title", "scheduled_at", "status", "updated_at"])
+    return event

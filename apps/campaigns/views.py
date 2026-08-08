@@ -1,4 +1,5 @@
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
@@ -9,11 +10,13 @@ from django.utils import timezone
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
+from apps.applications.models import RecruitmentEvent
 from apps.campaigns.forms import CampaignForm
 from apps.campaigns.models import Campaign
 from apps.campaigns.progress import campaign_progress
 from apps.campaigns.services import activate_campaign
 from apps.profiles.access import minimum_profile_complete
+from apps.profiles.models import CandidateProfile
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -32,12 +35,30 @@ def dashboard_context(account: Account, form: CampaignForm | None = None) -> dic
     active_campaign = Campaign.objects.filter(
         account=account, status=Campaign.Status.ACTIVE
     ).first()
+    candidate_timezone_name = CandidateProfile.objects.get(account=account).timezone
+    candidate_timezone = ZoneInfo(candidate_timezone_name)
+    upcoming_events = list(
+        RecruitmentEvent.objects.filter(
+            application__account=account,
+            status=RecruitmentEvent.Status.SCHEDULED,
+            scheduled_at__gt=timezone.now(),
+        )
+        .select_related("application__company")
+        .order_by("scheduled_at", "pk")
+    )
+    for event in upcoming_events:
+        event.display_scheduled_at = timezone.localtime(
+            event.scheduled_at,
+            candidate_timezone,
+        ).replace(tzinfo=None)
     return {
         "active_campaign": active_campaign,
         "campaign_progress": campaign_progress(account, active_campaign)
         if active_campaign
         else None,
         "campaign_form": form or CampaignForm(),
+        "upcoming_events": upcoming_events,
+        "candidate_timezone": candidate_timezone_name,
     }
 
 
