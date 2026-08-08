@@ -30,6 +30,38 @@ jobs:
       - run: uv run mypy apps config manage.py
       - run: uv run pytest tests/unit
 
+  container:
+    name: Build and verify production image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag applykit:ci .
+      - run: >-
+          docker run --rm
+          --env DJANGO_SETTINGS_MODULE=config.settings.production
+          --env DJANGO_SECRET_KEY=ci-production-secret-that-is-long-enough-for-production-checks-123456
+          --env DJANGO_ALLOWED_HOSTS=app.example.com,127.0.0.1
+          --env DATABASE_URL=postgresql://applykit:applykit@db.example.com:5432/applykit
+          --env RESEND_API_KEY=re_ci_test_key
+          --env 'DEFAULT_FROM_EMAIL=ApplyKit <noreply@example.com>'
+          applykit:ci
+          uv run --no-sync python manage.py check --deploy
+      - name: Start production web process
+        run: |
+          docker run --detach --name applykit-ci --publish 8080:8000 \
+            --env DJANGO_SETTINGS_MODULE=config.settings.production \
+            --env DJANGO_SECRET_KEY=ci-production-secret-that-is-long-enough-for-production-checks-123456 \
+            --env DJANGO_ALLOWED_HOSTS=app.example.com,127.0.0.1 \
+            --env DATABASE_URL=postgresql://applykit:applykit@db.example.com:5432/applykit \
+            --env RESEND_API_KEY=re_ci_test_key \
+            --env 'DEFAULT_FROM_EMAIL=ApplyKit <noreply@example.com>' \
+            applykit:ci
+          trap 'docker rm --force applykit-ci' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 \
+            --header 'X-Forwarded-Proto: https' http://127.0.0.1:8080/
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 \
+            --header 'X-Forwarded-Proto: https' http://127.0.0.1:8080/static/css/app.css
+
   integration:
     name: PostgreSQL integration tests
     if: github.event_name != 'pull_request'

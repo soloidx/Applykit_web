@@ -49,3 +49,13 @@ The web service is available at `http://127.0.0.1:8000/`.
 The migration command is intentionally explicit; the web process does not race migrations during startup.
 
 Production uses `config.settings.production`, requires PostgreSQL and secure environment values, and expects migrations to run as an explicit deployment step before the web process starts.
+
+Build and deploy the stateless production image on the platform, then run migrations once for the release before starting web processes:
+
+```sh
+docker build --tag applykit:latest .
+docker run --rm --env-file .env.production applykit:latest uv run --no-sync python manage.py migrate
+docker run --env-file .env.production --publish 8000:8000 applykit:latest
+```
+
+The image build compiles Tailwind CSS and collects Django static files. PostgreSQL, TLS termination, and secrets remain external platform responsibilities.
