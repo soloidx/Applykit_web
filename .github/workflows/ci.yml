@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  fast:
+    name: Lint, typecheck, and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.11.25
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: uv sync --locked
+      - run: npm ci
+      - run: npm run build:css
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy apps config manage.py
+      - run: uv run pytest tests/unit
+
+  integration:
+    name: PostgreSQL integration tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: applykit
+          POSTGRES_USER: applykit
+          POSTGRES_PASSWORD: applykit
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U applykit -d applykit"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.11.25
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - run: uv sync --locked
+      - run: uv run pytest tests/integration
+        env:
+          DATABASE_URL: postgres://applykit:applykit@127.0.0.1:5432/applykit
+
+  browser:
+    name: Playwright browser smoke test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: integration
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: applykit
+          POSTGRES_USER: applykit
+          POSTGRES_PASSWORD: applykit
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U applykit -d applykit"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.11.25
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - run: uv sync --locked
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -m browser
+        env:
+          DATABASE_URL: postgres://applykit:applykit@127.0.0.1:5432/applykit
+          DJANGO_ALLOW_ASYNC_UNSAFE: "true"
