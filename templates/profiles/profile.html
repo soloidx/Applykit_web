@@ -187,6 +187,88 @@
       {% endfor %}
     </div>
   </section>
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="skills-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Capabilities</p>
+        <h2 id="skills-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Skills</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Keep the skills that matter most in the order you want to remember them.</p>
+    </div>
+    <div class="mt-8">{% include "profiles/_skill_form.html" %}</div>
+    <div class="mt-8 flex flex-wrap gap-3">
+      {% for skill in skills %}
+      <div class="flex items-center gap-2 rounded-full border border-ink/10 bg-sand/70 px-4 py-2 text-sm font-semibold">
+        <span>{{ skill.name }}</span>
+        <form method="post" action="{% url 'skill_delete' skill.pk %}">
+          {% csrf_token %}
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ skill.name }}">Remove</button>
+        </form>
+        <form method="post" action="{% url 'skill_reorder' skill.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="direction" value="up">
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.name }} up">&uarr;</button>
+        </form>
+        <form method="post" action="{% url 'skill_reorder' skill.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="direction" value="down">
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.name }} down">&darr;</button>
+        </form>
+      </div>
+      {% empty %}
+      <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add your first skill when you are ready.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="languages-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Communication</p>
+        <h2 id="languages-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Languages</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Record the languages you use and how confidently you use them.</p>
+    </div>
+    <div class="mt-8">{% include "profiles/_language_form.html" %}</div>
+    <div class="mt-8 space-y-4">
+      {% for language in languages %}
+      <article class="flex flex-col gap-4 rounded-3xl border border-ink/10 bg-sand/60 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
+        <div>
+          <h3 class="font-display text-2xl font-semibold">{{ language.name }}</h3>
+          <p class="mt-1 text-sm text-ink/60">{{ language.get_proficiency_display }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2 text-sm font-semibold">
+          <a class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" href="{% url 'language_edit' language.pk %}">Edit</a>
+          <form method="post" action="{% url 'language_delete' language.pk %}">
+            {% csrf_token %}
+            <button class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" type="submit">Remove</button>
+          </form>
+          <form method="post" action="{% url 'language_reorder' language.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="direction" value="up">
+            <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ language.name }} up">&uarr;</button>
+          </form>
+          <form method="post" action="{% url 'language_reorder' language.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="direction" value="down">
+            <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ language.name }} down">&darr;</button>
+          </form>
+        </div>
+      </article>
+      {% empty %}
+      <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add a language when you are ready.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="preferences-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Presentation</p>
+        <h2 id="preferences-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Preferences</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Choose which profile sections should be available for future presentations. These settings do not change your source data.</p>
+    </div>
+    <div class="mt-8">{% include "profiles/_preferences_form.html" %}</div>
+  </section>
   {% endif %}
 </section>
 {% endblock %}

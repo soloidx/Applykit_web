@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -15,9 +15,21 @@ from apps.profiles.forms import (
     EducationForm,
     ExperienceForm,
     HighlightForm,
+    LanguageForm,
+    PresentationPreferencesForm,
     ProjectForm,
+    SkillForm,
 )
-from apps.profiles.models import CandidateProfile, Education, Experience, Highlight, Project
+from apps.profiles.models import (
+    CandidateProfile,
+    Education,
+    Experience,
+    Highlight,
+    Language,
+    PresentationPreferences,
+    Project,
+    Skill,
+)
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -36,7 +48,15 @@ def _profile_context(
     education_form_action: str | None = None,
     project_form: ProjectForm | None = None,
     project_form_action: str | None = None,
+    skill_form: SkillForm | None = None,
+    skill_form_action: str | None = None,
+    language_form: LanguageForm | None = None,
+    language_form_action: str | None = None,
+    presentation_preferences_form: PresentationPreferencesForm | None = None,
 ) -> dict[str, object]:
+    presentation_preferences, _ = PresentationPreferences.objects.get_or_create(
+        profile=candidate_profile
+    )
     return {
         "candidate_profile": candidate_profile,
         "experiences": candidate_profile.experiences.prefetch_related("highlights"),
@@ -51,6 +71,20 @@ def _profile_context(
         "projects": candidate_profile.projects.all(),
         "project_form": project_form if project_form is not None else ProjectForm(),
         "project_form_action": project_form_action or reverse("project_create"),
+        "skills": candidate_profile.skills.all(),
+        "skill_form": skill_form
+        if skill_form is not None
+        else SkillForm(profile=candidate_profile),
+        "skill_form_action": skill_form_action or reverse("skill_create"),
+        "languages": candidate_profile.languages.all(),
+        "language_form": language_form
+        if language_form is not None
+        else LanguageForm(profile=candidate_profile),
+        "language_form_action": language_form_action or reverse("language_create"),
+        "presentation_preferences": presentation_preferences,
+        "presentation_preferences_form": presentation_preferences_form
+        if presentation_preferences_form is not None
+        else PresentationPreferencesForm(instance=presentation_preferences),
     }
 
 
@@ -76,6 +110,14 @@ def _education_for_account(account: Account, education_id: int) -> Education:
 
 def _project_for_account(account: Account, project_id: int) -> Project:
     return get_object_or_404(Project, pk=project_id, profile__account=account)
+
+
+def _skill_for_account(account: Account, skill_id: int) -> Skill:
+    return get_object_or_404(Skill, pk=skill_id, profile__account=account)
+
+
+def _language_for_account(account: Account, language_id: int) -> Language:
+    return get_object_or_404(Language, pk=language_id, profile__account=account)
 
 
 def _redirect_or_htmx_redirect(request: HttpRequest) -> HttpResponse:
@@ -108,6 +150,18 @@ def _normalize_project_positions(profile: CandidateProfile) -> None:
     for position, project in enumerate(profile.projects.order_by("position", "id")):
         if project.position != position:
             Project.objects.filter(pk=project.pk).update(position=position)
+
+
+def _normalize_skill_positions(profile: CandidateProfile) -> None:
+    for position, skill in enumerate(profile.skills.order_by("position", "id")):
+        if skill.position != position:
+            Skill.objects.filter(pk=skill.pk).update(position=position)
+
+
+def _normalize_language_positions(profile: CandidateProfile) -> None:
+    for position, language in enumerate(profile.languages.order_by("position", "id")):
+        if language.position != position:
+            Language.objects.filter(pk=language.pk).update(position=position)
 
 
 @login_required
@@ -487,3 +541,200 @@ def highlight_reorder(request: HttpRequest, experience_id: int, highlight_id: in
             for position, item in enumerate(highlights):
                 Highlight.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def skill_create(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    candidate_profile = _profile_for_account(account)
+    form = SkillForm(request.POST or None, profile=candidate_profile)
+    action = reverse("skill_create")
+    if request.method == "POST" and form.is_valid():
+        try:
+            with transaction.atomic():
+                locked_profile = CandidateProfile.objects.select_for_update().get(
+                    pk=candidate_profile.pk
+                )
+                normalized_name = form.cleaned_data["name"].casefold()
+                if Skill.objects.filter(
+                    profile=locked_profile,
+                    normalized_name=normalized_name,
+                ).exists():
+                    form.add_error("name", "This skill is already in your profile.")
+                else:
+                    skill = form.save(commit=False)
+                    skill.profile = locked_profile
+                    skill.position = locked_profile.skills.count()
+                    skill.save()
+        except IntegrityError:
+            form.add_error("name", "This skill is already in your profile.")
+        if not form.errors:
+            return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        candidate_profile,
+        skill_form=form,
+        skill_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_skill_form.html", context)
+    context["form"] = CandidateProfileForm(instance=candidate_profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def skill_delete(request: HttpRequest, skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    skill = _skill_for_account(account, skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=skill.profile_id)
+        skill.delete()
+        _normalize_skill_positions(profile)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def skill_reorder(request: HttpRequest, skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    skill = _skill_for_account(account, skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=skill.profile_id)
+        skills = list(profile.skills.order_by("position", "id"))
+        index = skills.index(skill)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(skills):
+            skills[index], skills[swap_index] = skills[swap_index], skills[index]
+            for position, item in enumerate(skills):
+                Skill.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def language_create(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    candidate_profile = _profile_for_account(account)
+    form = LanguageForm(request.POST or None, profile=candidate_profile)
+    action = reverse("language_create")
+    if request.method == "POST" and form.is_valid():
+        try:
+            with transaction.atomic():
+                locked_profile = CandidateProfile.objects.select_for_update().get(
+                    pk=candidate_profile.pk
+                )
+                normalized_name = form.cleaned_data["name"].casefold()
+                if Language.objects.filter(
+                    profile=locked_profile,
+                    normalized_name=normalized_name,
+                ).exists():
+                    form.add_error("name", "This language is already in your profile.")
+                else:
+                    language = form.save(commit=False)
+                    language.profile = locked_profile
+                    language.position = locked_profile.languages.count()
+                    language.save()
+        except IntegrityError:
+            form.add_error("name", "This language is already in your profile.")
+        if not form.errors:
+            return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        candidate_profile,
+        language_form=form,
+        language_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_language_form.html", context)
+    context["form"] = CandidateProfileForm(instance=candidate_profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def language_edit(request: HttpRequest, language_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    language = _language_for_account(account, language_id)
+    form = LanguageForm(request.POST or None, instance=language, profile=language.profile)
+    action = reverse("language_edit", args=[language.pk])
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        language.profile,
+        language_form=form,
+        language_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_language_form.html", context)
+    context["form"] = CandidateProfileForm(instance=language.profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def language_delete(request: HttpRequest, language_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    language = _language_for_account(account, language_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=language.profile_id)
+        language.delete()
+        _normalize_language_positions(profile)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def language_reorder(request: HttpRequest, language_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    language = _language_for_account(account, language_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=language.profile_id)
+        languages = list(profile.languages.order_by("position", "id"))
+        index = languages.index(language)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(languages):
+            languages[index], languages[swap_index] = languages[swap_index], languages[index]
+            for position, item in enumerate(languages):
+                Language.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def presentation_preferences(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    profile = _profile_for_account(account)
+    preferences, _ = PresentationPreferences.objects.get_or_create(profile=profile)
+    form = PresentationPreferencesForm(request.POST or None, instance=preferences)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        profile,
+        presentation_preferences_form=form,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_preferences_form.html", context)
+    context["form"] = CandidateProfileForm(instance=profile)
+    return render(request, "profiles/profile.html", context)

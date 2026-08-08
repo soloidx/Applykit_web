@@ -13,11 +13,19 @@ from apps.profiles.views import (
     highlight_delete,
     highlight_edit,
     highlight_reorder,
+    language_create,
+    language_delete,
+    language_edit,
+    language_reorder,
+    presentation_preferences,
     profile,
     project_create,
     project_delete,
     project_edit,
     project_reorder,
+    skill_create,
+    skill_delete,
+    skill_reorder,
 )
 
 urlpatterns = [
@@ -89,5 +97,21 @@ urlpatterns = [
         "profile/projects/<int:project_id>/reorder/",
         project_reorder,
         name="project_reorder",
+    ),
+    path("profile/skills/new/", skill_create, name="skill_create"),
+    path("profile/skills/<int:skill_id>/delete/", skill_delete, name="skill_delete"),
+    path("profile/skills/<int:skill_id>/reorder/", skill_reorder, name="skill_reorder"),
+    path("profile/languages/new/", language_create, name="language_create"),
+    path("profile/languages/<int:language_id>/edit/", language_edit, name="language_edit"),
+    path("profile/languages/<int:language_id>/delete/", language_delete, name="language_delete"),
+    path(
+        "profile/languages/<int:language_id>/reorder/",
+        language_reorder,
+        name="language_reorder",
+    ),
+    path(
+        "profile/preferences/",
+        presentation_preferences,
+        name="presentation_preferences",
     ),
 ]

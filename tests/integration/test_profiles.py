@@ -6,7 +6,16 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.profiles.models import CandidateProfile, Education, Experience, Highlight, Project
+from apps.profiles.models import (
+    CandidateProfile,
+    Education,
+    Experience,
+    Highlight,
+    Language,
+    PresentationPreferences,
+    Project,
+    Skill,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -423,6 +432,18 @@ def project_data(**overrides: str) -> dict[str, str]:
     return data
 
 
+def skill_data(**overrides: str) -> dict[str, str]:
+    data = {"name": "Python"}
+    data.update(overrides)
+    return data
+
+
+def language_data(**overrides: str) -> dict[str, str]:
+    data = {"name": "English", "proficiency": "fluent"}
+    data.update(overrides)
+    return data
+
+
 @pytest.mark.django_db
 def test_candidate_can_create_view_edit_reorder_and_remove_education_entries() -> None:
     account = verified_account("candidate@example.com")
@@ -669,3 +690,181 @@ def test_education_and_project_operations_cannot_cross_account_boundaries() -> N
 
     assert Education.objects.get(pk=education.pk).institution == "University of London"
     assert Project.objects.get(pk=project.pk).description == "Private description."
+
+
+@pytest.mark.django_db
+def test_candidate_can_manage_ordered_unique_skills() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(reverse("skill_create"), skill_data())
+    second_response = client.post(
+        reverse("skill_create"),
+        skill_data(name="Django"),
+        headers={"HX-Request": "true"},
+    )
+    duplicate_response = client.post(reverse("skill_create"), skill_data(name=" python "))
+    whitespace_response = client.post(reverse("skill_create"), skill_data(name="   "))
+
+    assert first_response.url == reverse("profile")
+    assert second_response.headers["HX-Redirect"] == reverse("profile")
+    assert duplicate_response.status_code == 200
+    assert whitespace_response.status_code == 200
+    assert b"Enter a skill." in whitespace_response.content
+    assert b"already" in duplicate_response.content
+    assert list(Skill.objects.values_list("name", flat=True)) == ["Python", "Django"]
+
+    first, second = Skill.objects.order_by("position")
+    reorder_response = client.post(
+        reverse("skill_reorder", args=[second.pk]),
+        {"direction": "up"},
+    )
+    delete_response = client.post(reverse("skill_delete", args=[first.pk]))
+
+    assert reorder_response.url == reverse("profile")
+    assert delete_response.url == reverse("profile")
+    assert list(Skill.objects.values_list("name", flat=True)) == ["Django"]
+    assert Skill.objects.get().position == 0
+
+
+@pytest.mark.django_db
+def test_candidate_can_manage_languages_with_proficiency_and_htmx_feedback() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    invalid_response = client.post(
+        reverse("language_create"),
+        language_data(name="", proficiency="unknown"),
+        headers={"HX-Request": "true"},
+    )
+    assert invalid_response.status_code == 200
+    assert b"This field is required." in invalid_response.content
+    assert b"Select a valid choice" in invalid_response.content
+    assert not Language.objects.exists()
+
+    first_response = client.post(reverse("language_create"), language_data())
+    second_response = client.post(
+        reverse("language_create"),
+        language_data(name="French", proficiency="intermediate"),
+    )
+    first, second = Language.objects.order_by("position")
+    edit_response = client.post(
+        reverse("language_edit", args=[first.pk]),
+        language_data(proficiency="native"),
+        headers={"HX-Request": "true"},
+    )
+    assert Language.objects.get(pk=first.pk).proficiency == "native"
+    reorder_response = client.post(
+        reverse("language_reorder", args=[second.pk]),
+        {"direction": "up"},
+        headers={"HX-Request": "true"},
+    )
+    delete_response = client.post(
+        reverse("language_delete", args=[first.pk]),
+        headers={"HX-Request": "true"},
+    )
+
+    assert first_response.url == reverse("profile")
+    assert second_response.url == reverse("profile")
+    assert edit_response.headers["HX-Redirect"] == reverse("profile")
+    assert reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(Language.objects.values_list("name", "proficiency")) == [("French", "intermediate")]
+
+
+@pytest.mark.django_db
+def test_presentation_preferences_are_independent_from_career_history() -> None:
+    account = verified_account("candidate@example.com")
+    profile = create_profile(account)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Senior engineer",
+        organization="Analytical Engines Ltd",
+        location="London, UK",
+        start_date="2020-01-01",
+    )
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("presentation_preferences"),
+        {
+            "show_contact_details": "",
+            "show_professional_summary": "",
+            "show_experience": "on",
+            "show_education": "",
+            "show_projects": "on",
+            "show_skills": "on",
+            "show_languages": "",
+        },
+    )
+
+    assert response.url == reverse("profile")
+    preferences = PresentationPreferences.objects.get(profile=profile)
+    assert preferences.show_contact_details is False
+    assert preferences.show_experience is True
+    assert preferences.show_languages is False
+    assert Experience.objects.get(pk=experience.pk).role == "Senior engineer"
+
+    htmx_response = client.post(
+        reverse("presentation_preferences"),
+        {
+            "show_contact_details": "on",
+            "show_professional_summary": "on",
+            "show_experience": "on",
+            "show_education": "on",
+            "show_projects": "",
+            "show_skills": "on",
+            "show_languages": "on",
+        },
+        headers={"HX-Request": "true"},
+    )
+
+    assert htmx_response.headers["HX-Redirect"] == reverse("profile")
+    assert PresentationPreferences.objects.get(profile=profile).show_projects is False
+
+
+@pytest.mark.django_db
+def test_skill_language_and_preference_operations_cannot_cross_account_boundaries() -> None:
+    owner = verified_account("owner@example.com")
+    intruder = verified_account("intruder@example.com")
+    profile = create_profile(owner)
+    create_profile(intruder)
+    skill = Skill.objects.create(profile=profile, name="Python", position=0)
+    language = Language.objects.create(
+        profile=profile,
+        name="English",
+        proficiency="fluent",
+        position=0,
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    requests = [
+        (reverse("skill_delete", args=[skill.pk]), {}, "post"),
+        (reverse("skill_reorder", args=[skill.pk]), {"direction": "up"}, "post"),
+        (reverse("language_edit", args=[language.pk]), language_data(), "post"),
+        (reverse("language_delete", args=[language.pk]), {}, "post"),
+        (reverse("language_reorder", args=[language.pk]), {"direction": "up"}, "post"),
+    ]
+    for url, data, method in requests:
+        response = getattr(client, method)(url, data)
+        assert response.status_code == 404
+
+    assert Skill.objects.get(pk=skill.pk).name == "Python"
+    assert Language.objects.get(pk=language.pk).name == "English"
+    preferences_response = client.post(
+        reverse("presentation_preferences"),
+        {"show_experience": "on"},
+    )
+
+    assert preferences_response.status_code == 302
+    assert PresentationPreferences.objects.filter(
+        profile=intruder.candidate_profile,
+        show_experience=True,
+    ).exists()
+    assert not PresentationPreferences.objects.filter(profile=profile).exists()

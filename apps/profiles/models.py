@@ -44,6 +44,24 @@ class CandidateProfile(models.Model):
         return bool(self.full_name.strip()) and self.timezone in IANA_TIMEZONES
 
 
+class PresentationPreferences(models.Model):
+    profile = models.OneToOneField(
+        CandidateProfile,
+        on_delete=models.CASCADE,
+        related_name="presentation_preferences",
+    )
+    show_contact_details = models.BooleanField(default=True)
+    show_professional_summary = models.BooleanField(default=True)
+    show_experience = models.BooleanField(default=True)
+    show_education = models.BooleanField(default=True)
+    show_projects = models.BooleanField(default=True)
+    show_skills = models.BooleanField(default=True)
+    show_languages = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return f"Presentation preferences for {self.profile}"
+
+
 class Experience(models.Model):
     profile = models.ForeignKey(
         CandidateProfile,
@@ -172,4 +190,78 @@ class Project(models.Model):
                 Project.objects.filter(profile=self.profile).order_by("-position", "-id").first()
             )
             self.position = last_project.position + 1 if last_project else 0
+        super().save(*args, **kwargs)
+
+
+class Skill(models.Model):
+    profile = models.ForeignKey(
+        CandidateProfile,
+        on_delete=models.CASCADE,
+        related_name="skills",
+    )
+    name = models.CharField(max_length=100)
+    normalized_name = models.CharField(max_length=100, editable=False)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "normalized_name"],
+                name="skill_unique_name_per_profile",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.name = self.name.strip()
+        self.normalized_name = self.name.casefold()
+        if self._state.adding and self.position == 0:
+            last_skill = (
+                Skill.objects.filter(profile=self.profile).order_by("-position", "-id").first()
+            )
+            self.position = last_skill.position + 1 if last_skill else 0
+        super().save(*args, **kwargs)
+
+
+class Language(models.Model):
+    class Proficiency(models.TextChoices):
+        BEGINNER = "beginner", "Beginner"
+        INTERMEDIATE = "intermediate", "Intermediate"
+        ADVANCED = "advanced", "Advanced"
+        FLUENT = "fluent", "Fluent"
+        NATIVE = "native", "Native"
+
+    profile = models.ForeignKey(
+        CandidateProfile,
+        on_delete=models.CASCADE,
+        related_name="languages",
+    )
+    name = models.CharField(max_length=100)
+    normalized_name = models.CharField(max_length=100, editable=False)
+    proficiency = models.CharField(max_length=20, choices=Proficiency.choices)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "normalized_name"],
+                name="language_unique_name_per_profile",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.get_proficiency_display()})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.name = self.name.strip()
+        self.normalized_name = self.name.casefold()
+        if self._state.adding and self.position == 0:
+            last_language = (
+                Language.objects.filter(profile=self.profile).order_by("-position", "-id").first()
+            )
+            self.position = last_language.position + 1 if last_language else 0
         super().save(*args, **kwargs)

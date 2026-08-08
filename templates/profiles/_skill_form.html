@@ -1,0 +1,18 @@
+<div id="skill-form">
+  <div class="flex items-center justify-between gap-4">
+    <h3 class="font-display text-2xl font-semibold">{% if skill_form.instance.pk %}Edit skill{% else %}Add skill{% endif %}</h3>
+    {% if skill_form.instance.pk %}<a class="text-sm font-semibold text-coral hover:text-ink" href="{% url 'profile' %}">Cancel</a>{% endif %}
+  </div>
+  <form method="post" action="{{ skill_form_action }}" class="mt-5 space-y-6" hx-post="{{ skill_form_action }}" hx-target="#skill-form" hx-swap="outerHTML">
+    {% csrf_token %}
+    {% if skill_form.non_field_errors %}<div class="rounded-2xl bg-coral/10 px-4 py-3 text-sm text-coral" role="alert">{{ skill_form.non_field_errors }}</div>{% endif %}
+    {% for field in skill_form %}
+    <div>
+      <label class="text-sm font-semibold text-ink" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-coral">*</span>{% endif %}</label>
+      {{ field }}
+      {% for error in field.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+    {% endfor %}
+    <button class="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Save skill</button>
+  </form>
+</div>

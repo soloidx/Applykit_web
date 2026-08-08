@@ -9,7 +9,10 @@ from apps.profiles.models import (
     Education,
     Experience,
     Highlight,
+    Language,
+    PresentationPreferences,
     Project,
+    Skill,
     validate_iana_timezone,
 )
 
@@ -168,4 +171,113 @@ class ProjectForm(forms.ModelForm):
                 "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
                 "text-ink outline-none transition placeholder:text-ink/35 "
                 "focus:border-coral focus:ring-2 focus:ring-coral/20"
+            )
+
+
+class SkillForm(forms.ModelForm):
+    name = forms.CharField(strip=False, label="Skill")
+
+    class Meta:
+        model = Skill
+        fields = ["name"]
+        labels = {"name": "Skill"}
+
+    def __init__(
+        self,
+        *args: Any,
+        profile: CandidateProfile | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.profile = profile or getattr(self.instance, "profile", None)
+        self.fields["name"].widget.attrs["class"] = (
+            "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+            "text-ink outline-none transition placeholder:text-ink/35 "
+            "focus:border-coral focus:ring-2 focus:ring-coral/20"
+        )
+
+    def clean_name(self) -> str:
+        name = self.cleaned_data["name"].strip()
+        if not name:
+            raise forms.ValidationError("Enter a skill.")
+        if (
+            self.profile
+            and Skill.objects.filter(
+                profile=self.profile,
+                normalized_name=name.casefold(),
+            )
+            .exclude(pk=self.instance.pk)
+            .exists()
+        ):
+            raise forms.ValidationError("This skill is already in your profile.")
+        return name
+
+
+class LanguageForm(forms.ModelForm):
+    name = forms.CharField(strip=False, label="Language")
+
+    class Meta:
+        model = Language
+        fields = ["name", "proficiency"]
+        labels = {"name": "Language", "proficiency": "Proficiency"}
+
+    def __init__(
+        self,
+        *args: Any,
+        profile: CandidateProfile | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.profile = profile or getattr(self.instance, "profile", None)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+                "text-ink outline-none transition placeholder:text-ink/35 "
+                "focus:border-coral focus:ring-2 focus:ring-coral/20"
+            )
+
+    def clean_name(self) -> str:
+        name = self.cleaned_data["name"].strip()
+        if not name:
+            raise forms.ValidationError("Enter a language.")
+        if (
+            self.profile
+            and Language.objects.filter(
+                profile=self.profile,
+                normalized_name=name.casefold(),
+            )
+            .exclude(pk=self.instance.pk)
+            .exists()
+        ):
+            raise forms.ValidationError("This language is already in your profile.")
+        return name
+
+
+class PresentationPreferencesForm(forms.ModelForm):
+    class Meta:
+        model = PresentationPreferences
+        fields = [
+            "show_contact_details",
+            "show_professional_summary",
+            "show_experience",
+            "show_education",
+            "show_projects",
+            "show_skills",
+            "show_languages",
+        ]
+        labels = {
+            "show_contact_details": "Contact details",
+            "show_professional_summary": "Professional summary",
+            "show_experience": "Experience",
+            "show_education": "Education",
+            "show_projects": "Projects",
+            "show_skills": "Skills",
+            "show_languages": "Languages",
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "h-4 w-4 rounded border-ink/20 text-coral focus:ring-coral/20"
             )
