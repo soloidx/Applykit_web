@@ -4,7 +4,14 @@ from typing import Any
 
 from django import forms
 
-from apps.profiles.models import CandidateProfile, Experience, Highlight, validate_iana_timezone
+from apps.profiles.models import (
+    CandidateProfile,
+    Education,
+    Experience,
+    Highlight,
+    Project,
+    validate_iana_timezone,
+)
 
 
 class CandidateProfileForm(forms.ModelForm):
@@ -111,3 +118,54 @@ class HighlightForm(forms.ModelForm):
             "text-ink outline-none transition placeholder:text-ink/35 "
             "focus:border-coral focus:ring-2 focus:ring-coral/20"
         )
+
+
+class EducationForm(forms.ModelForm):
+    class Meta:
+        model = Education
+        fields = ["institution", "degree", "start_date", "end_date"]
+        labels = {
+            "institution": "Institution",
+            "degree": "Degree",
+            "start_date": "Start date",
+            "end_date": "End date",
+        }
+        help_texts = {"end_date": "Leave blank if this is ongoing."}
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+                "text-ink outline-none transition placeholder:text-ink/35 "
+                "focus:border-coral focus:ring-2 focus:ring-coral/20"
+            )
+
+
+class ProjectForm(forms.ModelForm):
+    class Meta:
+        model = Project
+        fields = ["name", "description", "technologies", "url"]
+        labels = {
+            "name": "Project name",
+            "description": "Description",
+            "technologies": "Technologies",
+            "url": "Project URL",
+        }
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 4}),
+            "technologies": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = (
+                "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+                "text-ink outline-none transition placeholder:text-ink/35 "
+                "focus:border-coral focus:ring-2 focus:ring-coral/20"
+            )

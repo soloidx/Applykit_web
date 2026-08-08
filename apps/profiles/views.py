@@ -10,8 +10,14 @@ from django.urls import reverse
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
-from apps.profiles.forms import CandidateProfileForm, ExperienceForm, HighlightForm
-from apps.profiles.models import CandidateProfile, Experience, Highlight
+from apps.profiles.forms import (
+    CandidateProfileForm,
+    EducationForm,
+    ExperienceForm,
+    HighlightForm,
+    ProjectForm,
+)
+from apps.profiles.models import CandidateProfile, Education, Experience, Highlight, Project
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -26,6 +32,10 @@ def _profile_context(
     highlight_form: HighlightForm | None = None,
     highlight_experience: Experience | None = None,
     highlight_form_action: str | None = None,
+    education_form: EducationForm | None = None,
+    education_form_action: str | None = None,
+    project_form: ProjectForm | None = None,
+    project_form_action: str | None = None,
 ) -> dict[str, object]:
     return {
         "candidate_profile": candidate_profile,
@@ -35,6 +45,12 @@ def _profile_context(
         "highlight_form": highlight_form,
         "highlight_experience": highlight_experience,
         "highlight_form_action": highlight_form_action,
+        "educations": candidate_profile.educations.all(),
+        "education_form": education_form if education_form is not None else EducationForm(),
+        "education_form_action": education_form_action or reverse("education_create"),
+        "projects": candidate_profile.projects.all(),
+        "project_form": project_form if project_form is not None else ProjectForm(),
+        "project_form_action": project_form_action or reverse("project_create"),
     }
 
 
@@ -52,6 +68,14 @@ def _highlight_for_account(
     experience = _experience_for_account(account, experience_id)
     highlight = get_object_or_404(Highlight, pk=highlight_id, experience=experience)
     return experience, highlight
+
+
+def _education_for_account(account: Account, education_id: int) -> Education:
+    return get_object_or_404(Education, pk=education_id, profile__account=account)
+
+
+def _project_for_account(account: Account, project_id: int) -> Project:
+    return get_object_or_404(Project, pk=project_id, profile__account=account)
 
 
 def _redirect_or_htmx_redirect(request: HttpRequest) -> HttpResponse:
@@ -72,6 +96,18 @@ def _normalize_highlight_positions(experience: Experience) -> None:
     for position, highlight in enumerate(experience.highlights.order_by("position", "id")):
         if highlight.position != position:
             Highlight.objects.filter(pk=highlight.pk).update(position=position)
+
+
+def _normalize_education_positions(profile: CandidateProfile) -> None:
+    for position, education in enumerate(profile.educations.order_by("position", "id")):
+        if education.position != position:
+            Education.objects.filter(pk=education.pk).update(position=position)
+
+
+def _normalize_project_positions(profile: CandidateProfile) -> None:
+    for position, project in enumerate(profile.projects.order_by("position", "id")):
+        if project.position != position:
+            Project.objects.filter(pk=project.pk).update(position=position)
 
 
 @login_required
@@ -190,6 +226,182 @@ def experience_reorder(request: HttpRequest, experience_id: int) -> HttpResponse
             )
             for position, item in enumerate(experiences):
                 Experience.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def education_create(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    candidate_profile = _profile_for_account(account)
+    form = EducationForm(request.POST or None)
+    action = reverse("education_create")
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            locked_profile = CandidateProfile.objects.select_for_update().get(
+                pk=candidate_profile.pk
+            )
+            education = form.save(commit=False)
+            education.profile = locked_profile
+            education.position = locked_profile.educations.count()
+            education.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        candidate_profile,
+        education_form=form,
+        education_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_education_form.html", context)
+    context["form"] = CandidateProfileForm(instance=candidate_profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def education_edit(request: HttpRequest, education_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    education = _education_for_account(account, education_id)
+    form = EducationForm(request.POST or None, instance=education)
+    action = reverse("education_edit", args=[education.pk])
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        education.profile,
+        education_form=form,
+        education_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_education_form.html", context)
+    context["form"] = CandidateProfileForm(instance=education.profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def education_delete(request: HttpRequest, education_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    education = _education_for_account(account, education_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=education.profile_id)
+        education.delete()
+        _normalize_education_positions(profile)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def education_reorder(request: HttpRequest, education_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    education = _education_for_account(account, education_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=education.profile_id)
+        educations = list(profile.educations.order_by("position", "id"))
+        index = educations.index(education)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(educations):
+            educations[index], educations[swap_index] = educations[swap_index], educations[index]
+            for position, item in enumerate(educations):
+                Education.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def project_create(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    candidate_profile = _profile_for_account(account)
+    form = ProjectForm(request.POST or None)
+    action = reverse("project_create")
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            locked_profile = CandidateProfile.objects.select_for_update().get(
+                pk=candidate_profile.pk
+            )
+            project = form.save(commit=False)
+            project.profile = locked_profile
+            project.position = locked_profile.projects.count()
+            project.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        candidate_profile,
+        project_form=form,
+        project_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_project_form.html", context)
+    context["form"] = CandidateProfileForm(instance=candidate_profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def project_edit(request: HttpRequest, project_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project = _project_for_account(account, project_id)
+    form = ProjectForm(request.POST or None, instance=project)
+    action = reverse("project_edit", args=[project.pk])
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        project.profile,
+        project_form=form,
+        project_form_action=action,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_project_form.html", context)
+    context["form"] = CandidateProfileForm(instance=project.profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def project_delete(request: HttpRequest, project_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project = _project_for_account(account, project_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=project.profile_id)
+        project.delete()
+        _normalize_project_positions(profile)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def project_reorder(request: HttpRequest, project_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project = _project_for_account(account, project_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        profile = CandidateProfile.objects.select_for_update().get(pk=project.profile_id)
+        projects = list(profile.projects.order_by("position", "id"))
+        index = projects.index(project)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(projects):
+            projects[index], projects[swap_index] = projects[swap_index], projects[index]
+            for position, item in enumerate(projects):
+                Project.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
 
 

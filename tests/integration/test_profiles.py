@@ -6,7 +6,7 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.profiles.models import CandidateProfile, Experience, Highlight
+from apps.profiles.models import CandidateProfile, Education, Experience, Highlight, Project
 
 pytestmark = pytest.mark.integration
 
@@ -399,3 +399,273 @@ def test_experience_and_highlight_operations_cannot_cross_account_boundaries() -
 
     assert Experience.objects.get(pk=experience.pk).role == "Senior engineer"
     assert Highlight.objects.get(pk=highlight.pk).text == "Private achievement."
+
+
+def education_data(**overrides: str) -> dict[str, str]:
+    data = {
+        "institution": "University of London",
+        "degree": "BSc Mathematics",
+        "start_date": "2015-09-01",
+        "end_date": "2018-06-30",
+    }
+    data.update(overrides)
+    return data
+
+
+def project_data(**overrides: str) -> dict[str, str]:
+    data = {
+        "name": "Analytical Engine Visualizer",
+        "description": "A visual exploration of mechanical computation.",
+        "technologies": "Python, Django",
+        "url": "https://example.com/analytical-engine",
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.mark.django_db
+def test_candidate_can_create_view_edit_reorder_and_remove_education_entries() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(reverse("education_create"), education_data())
+    second_response = client.post(
+        reverse("education_create"),
+        education_data(institution="University of Cambridge", degree="MPhil Computer Science"),
+    )
+    assert first_response.url == reverse("profile")
+    assert second_response.url == reverse("profile")
+    first, second = Education.objects.order_by("position")
+    assert [first.institution, second.institution] == [
+        "University of London",
+        "University of Cambridge",
+    ]
+
+    edit_response = client.post(
+        reverse("education_edit", args=[first.pk]),
+        education_data(degree="BSc Applied Mathematics"),
+    )
+    move_response = client.post(
+        reverse("education_reorder", args=[second.pk]),
+        {"direction": "up"},
+    )
+    assert edit_response.url == reverse("profile")
+    assert move_response.url == reverse("profile")
+    assert list(Education.objects.values_list("institution", flat=True)) == [
+        "University of Cambridge",
+        "University of London",
+    ]
+
+    delete_response = client.post(reverse("education_delete", args=[first.pk]))
+    assert delete_response.url == reverse("profile")
+    assert list(Education.objects.values_list("institution", flat=True)) == [
+        "University of Cambridge"
+    ]
+    assert Education.objects.get().position == 0
+
+
+@pytest.mark.django_db
+def test_education_current_dates_and_htmx_validation_are_consistent() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    invalid_response = client.post(
+        reverse("education_create"),
+        education_data(end_date="2015-08-31"),
+    )
+    assert invalid_response.status_code == 200
+    assert b"End date must be on or after the start date" in invalid_response.content
+    assert not Education.objects.exists()
+
+    current_response = client.post(
+        reverse("education_create"),
+        education_data(end_date=""),
+        headers={"HX-Request": "true"},
+    )
+    assert current_response.status_code == 200
+    assert current_response.headers["HX-Redirect"] == reverse("profile")
+    assert Education.objects.get().end_date is None
+
+    education = Education.objects.get()
+    education.end_date = education.start_date.replace(year=2014)
+    with pytest.raises(ValidationError):
+        education.full_clean()
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Education.objects.create(
+                profile=account.candidate_profile,
+                institution="Invalid University",
+                degree="Invalid degree",
+                start_date="2018-01-01",
+                end_date="2017-01-01",
+            )
+
+
+@pytest.mark.django_db
+def test_candidate_can_create_view_edit_reorder_and_remove_project_entries() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(reverse("project_create"), project_data())
+    second_response = client.post(
+        reverse("project_create"),
+        project_data(name="Open source compiler", technologies="Rust"),
+    )
+    assert first_response.url == reverse("profile")
+    assert second_response.url == reverse("profile")
+    first, second = Project.objects.order_by("position")
+    assert [first.name, second.name] == ["Analytical Engine Visualizer", "Open source compiler"]
+
+    edit_response = client.post(
+        reverse("project_edit", args=[first.pk]),
+        project_data(description="A refreshed project description."),
+    )
+    move_response = client.post(
+        reverse("project_reorder", args=[second.pk]),
+        {"direction": "up"},
+    )
+    assert edit_response.url == reverse("profile")
+    assert move_response.url == reverse("profile")
+    assert list(Project.objects.values_list("name", flat=True)) == [
+        "Open source compiler",
+        "Analytical Engine Visualizer",
+    ]
+
+    delete_response = client.post(reverse("project_delete", args=[first.pk]))
+    assert delete_response.url == reverse("profile")
+    assert list(Project.objects.values_list("name", flat=True)) == ["Open source compiler"]
+    assert Project.objects.get().position == 0
+
+
+@pytest.mark.django_db
+def test_project_htmx_validation_and_success_match_ordinary_persistence() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+
+    invalid_response = client.post(
+        reverse("project_create"),
+        project_data(name=""),
+        headers={"HX-Request": "true"},
+    )
+    valid_response = client.post(
+        reverse("project_create"),
+        project_data(url=""),
+        headers={"HX-Request": "true"},
+    )
+
+    assert invalid_response.status_code == 200
+    assert b"This field is required." in invalid_response.content
+    assert valid_response.status_code == 200
+    assert valid_response.headers["HX-Redirect"] == reverse("profile")
+    assert Project.objects.filter(name="Analytical Engine Visualizer", url="").exists()
+
+
+@pytest.mark.django_db
+def test_education_htmx_edit_reorder_and_delete_match_ordinary_persistence() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+    client.post(reverse("education_create"), education_data())
+    client.post(
+        reverse("education_create"),
+        education_data(institution="University of Cambridge", degree="MPhil Computer Science"),
+    )
+    first, second = Education.objects.order_by("position")
+
+    edit_response = client.post(
+        reverse("education_edit", args=[first.pk]),
+        education_data(degree="BSc Applied Mathematics"),
+        headers={"HX-Request": "true"},
+    )
+    reorder_response = client.post(
+        reverse("education_reorder", args=[second.pk]),
+        {"direction": "up"},
+        headers={"HX-Request": "true"},
+    )
+    delete_response = client.post(
+        reverse("education_delete", args=[first.pk]),
+        headers={"HX-Request": "true"},
+    )
+
+    assert edit_response.headers["HX-Redirect"] == reverse("profile")
+    assert reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(Education.objects.values_list("institution", flat=True)) == [
+        "University of Cambridge"
+    ]
+
+
+@pytest.mark.django_db
+def test_project_htmx_edit_reorder_and_delete_match_ordinary_persistence() -> None:
+    account = verified_account("candidate@example.com")
+    create_profile(account)
+    client = Client()
+    client.force_login(account)
+    client.post(reverse("project_create"), project_data())
+    client.post(reverse("project_create"), project_data(name="Open source compiler"))
+    first, second = Project.objects.order_by("position")
+
+    edit_response = client.post(
+        reverse("project_edit", args=[first.pk]),
+        project_data(description="A refreshed project description."),
+        headers={"HX-Request": "true"},
+    )
+    reorder_response = client.post(
+        reverse("project_reorder", args=[second.pk]),
+        {"direction": "up"},
+        headers={"HX-Request": "true"},
+    )
+    delete_response = client.post(
+        reverse("project_delete", args=[first.pk]),
+        headers={"HX-Request": "true"},
+    )
+
+    assert edit_response.headers["HX-Redirect"] == reverse("profile")
+    assert reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(Project.objects.values_list("name", flat=True)) == ["Open source compiler"]
+
+
+@pytest.mark.django_db
+def test_education_and_project_operations_cannot_cross_account_boundaries() -> None:
+    owner = verified_account("owner@example.com")
+    intruder = verified_account("intruder@example.com")
+    profile = create_profile(owner)
+    create_profile(intruder)
+    education = Education.objects.create(
+        profile=profile,
+        institution="University of London",
+        degree="BSc Mathematics",
+        start_date="2015-09-01",
+    )
+    project = Project.objects.create(
+        profile=profile,
+        name="Private project",
+        description="Private description.",
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    requests = [
+        (reverse("education_edit", args=[education.pk]), education_data(), "post"),
+        (reverse("education_delete", args=[education.pk]), {}, "post"),
+        (reverse("education_reorder", args=[education.pk]), {}, "post"),
+        (reverse("project_edit", args=[project.pk]), project_data(), "post"),
+        (reverse("project_delete", args=[project.pk]), {}, "post"),
+        (reverse("project_reorder", args=[project.pk]), {}, "post"),
+    ]
+    for url, data, method in requests:
+        response = getattr(client, method)(url, data)
+        assert response.status_code == 404
+
+    assert Education.objects.get(pk=education.pk).institution == "University of London"
+    assert Project.objects.get(pk=project.pk).description == "Private description."

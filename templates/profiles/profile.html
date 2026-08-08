@@ -98,6 +98,95 @@
       {% endfor %}
     </div>
   </section>
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="education-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Qualifications</p>
+        <h2 id="education-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Education</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Keep your qualifications in the order you want to present them.</p>
+    </div>
+    <div class="mt-8">
+      {% include "profiles/_education_form.html" %}
+    </div>
+    <div class="mt-10 space-y-4">
+      {% for education in educations %}
+      <article class="rounded-3xl border border-ink/10 bg-sand/60 p-5 sm:p-7">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 class="font-display text-2xl font-semibold">{{ education.degree }}</h3>
+            <p class="mt-1 font-semibold text-coral">{{ education.institution }}</p>
+            <p class="mt-2 text-sm text-ink/60">{{ education.start_date|date:"M Y" }} - {% if education.end_date %}{{ education.end_date|date:"M Y" }}{% else %}Present{% endif %}</p>
+          </div>
+          <div class="flex flex-wrap gap-2 text-sm font-semibold">
+            <a class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" href="{% url 'education_edit' education.pk %}">Edit</a>
+            <form method="post" action="{% url 'education_delete' education.pk %}">
+              {% csrf_token %}
+              <button class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" type="submit">Remove</button>
+            </form>
+            <form method="post" action="{% url 'education_reorder' education.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="up">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ education.degree }} up">&uarr;</button>
+            </form>
+            <form method="post" action="{% url 'education_reorder' education.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="down">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ education.degree }} down">&darr;</button>
+            </form>
+          </div>
+        </div>
+      </article>
+      {% empty %}
+      <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add a qualification when you are ready.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="projects-heading">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Selected work</p>
+        <h2 id="projects-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Projects</h2>
+      </div>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Capture the independent work and technical context you want to keep close.</p>
+    </div>
+    <div class="mt-8">
+      {% include "profiles/_project_form.html" %}
+    </div>
+    <div class="mt-10 space-y-4">
+      {% for project in projects %}
+      <article class="rounded-3xl border border-ink/10 bg-sand/60 p-5 sm:p-7">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 class="font-display text-2xl font-semibold">{{ project.name }}</h3>
+            {% if project.url %}<a class="mt-1 inline-block text-sm font-semibold text-coral hover:text-ink" href="{{ project.url }}">{{ project.url }}</a>{% endif %}
+          </div>
+          <div class="flex flex-wrap gap-2 text-sm font-semibold">
+            <a class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" href="{% url 'project_edit' project.pk %}">Edit</a>
+            <form method="post" action="{% url 'project_delete' project.pk %}">
+              {% csrf_token %}
+              <button class="rounded-full border border-ink/15 px-4 py-2 transition hover:border-coral hover:text-coral" type="submit">Remove</button>
+            </form>
+            <form method="post" action="{% url 'project_reorder' project.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="up">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ project.name }} up">&uarr;</button>
+            </form>
+            <form method="post" action="{% url 'project_reorder' project.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="direction" value="down">
+              <button class="rounded-full border border-ink/15 px-3 py-2 transition hover:border-coral hover:text-coral" type="submit" aria-label="Move {{ project.name }} down">&darr;</button>
+            </form>
+          </div>
+        </div>
+        {% if project.description %}<p class="mt-5 max-w-3xl whitespace-pre-line text-sm leading-7 text-ink/70">{{ project.description }}</p>{% endif %}
+        {% if project.technologies %}<p class="mt-4 text-sm text-ink/60"><span class="font-semibold text-ink">Technologies:</span> {{ project.technologies }}</p>{% endif %}
+      </article>
+      {% empty %}
+      <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add a project when you are ready.</p>
+      {% endfor %}
+    </div>
+  </section>
   {% endif %}
 </section>
 {% endblock %}

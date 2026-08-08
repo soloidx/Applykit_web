@@ -108,3 +108,68 @@ class Highlight(models.Model):
             )
             self.position = last_highlight.position + 1 if last_highlight else 0
         super().save(*args, **kwargs)
+
+
+class Education(models.Model):
+    profile = models.ForeignKey(
+        CandidateProfile,
+        on_delete=models.CASCADE,
+        related_name="educations",
+    )
+    institution = models.CharField(max_length=200)
+    degree = models.CharField(max_length=200)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")),
+                name="education_end_date_on_or_after_start",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.degree} at {self.institution}"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.end_date and self.start_date and self.end_date < self.start_date:
+            raise ValidationError({"end_date": "End date must be on or after the start date."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and self.position == 0:
+            last_education = (
+                Education.objects.filter(profile=self.profile).order_by("-position", "-id").first()
+            )
+            self.position = last_education.position + 1 if last_education else 0
+        super().save(*args, **kwargs)
+
+
+class Project(models.Model):
+    profile = models.ForeignKey(
+        CandidateProfile,
+        on_delete=models.CASCADE,
+        related_name="projects",
+    )
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    technologies = models.TextField(blank=True)
+    url = models.URLField(blank=True)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and self.position == 0:
+            last_project = (
+                Project.objects.filter(profile=self.profile).order_by("-position", "-id").first()
+            )
+            self.position = last_project.position + 1 if last_project else 0
+        super().save(*args, **kwargs)
