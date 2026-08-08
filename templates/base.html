@@ -13,7 +13,14 @@
     <header class="border-b border-ink/10 bg-sand/90">
       <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5" aria-label="Main navigation">
         <a class="font-display text-2xl font-semibold tracking-tight" href="{% url 'home' %}">ApplyKit<span class="text-coral">.</span></a>
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'account_logout' %}">
+          {% csrf_token %}
+          <button class="text-sm font-semibold text-ink/70 transition hover:text-coral" type="submit">Sign out</button>
+        </form>
+        {% else %}
         <span class="hidden text-sm text-ink/60 sm:block">A calmer way to move your search forward.</span>
+        {% endif %}
       </nav>
     </header>
     <main>{% block content %}{% endblock %}</main>
