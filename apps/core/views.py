@@ -1,8 +1,12 @@
-from allauth.account.models import EmailAddress
-from django.contrib.auth import logout
+from typing import cast
+
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+
+from apps.accounts.access import verified_account_required
+from apps.accounts.models import Account
+from apps.profiles.access import minimum_profile_complete
 
 
 def home(request: HttpRequest) -> HttpResponse:
@@ -12,8 +16,8 @@ def home(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@verified_account_required
 def dashboard(request: HttpRequest) -> HttpResponse:
-    if not EmailAddress.objects.filter(user=request.user, verified=True).exists():
-        logout(request)
-        return redirect("account_login")
+    if not minimum_profile_complete(cast(Account, request.user)):
+        return redirect("profile")
     return render(request, "core/dashboard.html")

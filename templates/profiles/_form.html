@@ -1,0 +1,22 @@
+<div id="profile-form">
+  {% if profile_saved %}
+  <p class="mb-6 rounded-2xl bg-mint/60 px-4 py-3 text-sm font-semibold text-ink" role="status">Profile saved.</p>
+  {% endif %}
+  <form method="post" action="{% url 'profile' %}" class="space-y-8" hx-post="{% url 'profile' %}" hx-target="#profile-form" hx-swap="outerHTML">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="rounded-2xl bg-coral/10 px-4 py-3 text-sm text-coral" role="alert">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="grid gap-6 sm:grid-cols-2">
+      {% for field in form %}
+      <div class="{% if field.name == 'professional_summary' %}sm:col-span-2{% endif %}">
+        <label class="text-sm font-semibold text-ink" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-coral">*</span>{% endif %}</label>
+        {{ field }}
+        {% if field.help_text %}<p class="mt-2 text-sm leading-6 text-ink/55">{{ field.help_text }}</p>{% endif %}
+        {% for error in field.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    <button class="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Save profile</button>
+  </form>
+</div>

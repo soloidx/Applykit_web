@@ -34,8 +34,14 @@ def test_verified_candidate_can_sign_in_and_sign_out_in_browser(page, live_serve
     page.get_by_label("Password").fill("a-secure-password")
     page.get_by_role("button", name="Sign in").click()
 
+    assert page.get_by_role("heading", name="Start with the essentials.").is_visible()
+    page.get_by_label("Full name").fill("Browser Candidate")
+    page.get_by_label("Timezone").fill("America/New_York")
+    page.get_by_role("button", name="Save profile").click()
+    page.wait_for_url("**/dashboard/")
+
     assert page.get_by_role("heading", name="Your private workspace").is_visible()
-    assert page.get_by_text("browser@example.com").is_visible()
+    assert page.get_by_text("Browser Candidate").is_visible()
     assert page.get_by_text("No active campaign yet").is_visible()
 
     page.get_by_role("button", name="Sign out").click()

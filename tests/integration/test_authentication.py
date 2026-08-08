@@ -7,6 +7,7 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
+from apps.profiles.models import CandidateProfile
 
 pytestmark = pytest.mark.integration
 
@@ -61,6 +62,7 @@ def test_duplicate_registration_is_rejected_without_creating_another_account() -
 def test_verified_account_can_sign_in_and_reach_private_dashboard() -> None:
     account = Account.objects.create_user("candidate@example.com", "a-secure-password")
     EmailAddress.objects.create(user=account, email=account.email, primary=True, verified=True)
+    CandidateProfile.objects.create(account=account, full_name="Candidate Example", timezone="UTC")
     client = Client()
 
     response = client.post(
@@ -117,6 +119,7 @@ def test_private_dashboard_redirects_anonymous_users_to_sign_in() -> None:
 def test_sign_out_ends_access_to_private_dashboard() -> None:
     account = Account.objects.create_user("candidate@example.com", "a-secure-password")
     EmailAddress.objects.create(user=account, email=account.email, primary=True, verified=True)
+    CandidateProfile.objects.create(account=account, full_name="Candidate Example", timezone="UTC")
     client = Client()
     client.login(username=account.email, password="a-secure-password")
 
@@ -133,6 +136,8 @@ def test_dashboard_only_shows_the_authenticated_account() -> None:
     second = Account.objects.create_user("second@example.com", "a-secure-password")
     EmailAddress.objects.create(user=first, email=first.email, primary=True, verified=True)
     EmailAddress.objects.create(user=second, email=second.email, primary=True, verified=True)
+    CandidateProfile.objects.create(account=first, full_name="First Candidate", timezone="UTC")
+    CandidateProfile.objects.create(account=second, full_name="Second Candidate", timezone="UTC")
     client = Client()
     client.login(username=first.email, password="a-secure-password")
 
