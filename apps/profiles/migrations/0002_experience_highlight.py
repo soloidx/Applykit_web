@@ -1,4 +1,5 @@
 from django.db import migrations, models
+from django.db.models import F, Q
 import django.db.models.deletion
 
 
@@ -36,7 +37,15 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            options={"ordering": ["position", "id"]},
+            options={
+                "ordering": ["position", "id"],
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")),
+                        name="experience_end_date_on_or_after_start",
+                    )
+                ],
+            },
         ),
         migrations.CreateModel(
             name="Highlight",

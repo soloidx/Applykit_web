@@ -6,6 +6,7 @@ from zoneinfo import available_timezones
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import F, Q
 
 IANA_TIMEZONES = frozenset(available_timezones())
 
@@ -59,6 +60,12 @@ class Experience(models.Model):
 
     class Meta:
         ordering = ["position", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(end_date__isnull=True) | Q(end_date__gte=F("start_date")),
+                name="experience_end_date_on_or_after_start",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.role} at {self.organization}"

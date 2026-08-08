@@ -6,7 +6,7 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.profiles.models import CandidateProfile, Experience
+from apps.profiles.models import CandidateProfile, Experience, Highlight
 
 pytestmark = pytest.mark.integration
 
@@ -269,6 +269,15 @@ def test_experience_current_role_and_date_validation_are_consistent() -> None:
     experience.end_date = experience.start_date.replace(year=2019)
     with pytest.raises(ValidationError):
         experience.full_clean()
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            Experience.objects.create(
+                profile=account.candidate_profile,
+                role="Invalid role",
+                organization="Invalid Company",
+                start_date="2020-01-01",
+                end_date="2019-12-31",
+            )
 
 
 @pytest.mark.django_db
@@ -351,16 +360,34 @@ def test_experience_and_highlight_operations_cannot_cross_account_boundaries() -
         organization="Analytical Engines Ltd",
         start_date="2020-01-01",
     )
+    highlight = Highlight.objects.create(experience=experience, text="Private achievement.")
     client = Client()
     client.force_login(intruder)
 
-    for url in (
-        reverse("experience_edit", args=[experience.pk]),
-        reverse("experience_delete", args=[experience.pk]),
-        reverse("experience_reorder", args=[experience.pk]),
-        reverse("highlight_create", args=[experience.pk]),
-    ):
-        response = client.get(url) if url.endswith("edit/") else client.post(url)
+    requests = [
+        (reverse("experience_edit", args=[experience.pk]), {}, "get"),
+        (reverse("experience_delete", args=[experience.pk]), {}, "post"),
+        (reverse("experience_reorder", args=[experience.pk]), {}, "post"),
+        (reverse("highlight_create", args=[experience.pk]), {}, "post"),
+        (
+            reverse("highlight_edit", args=[experience.pk, highlight.pk]),
+            {"text": "Changed by intruder."},
+            "post",
+        ),
+        (
+            reverse("highlight_delete", args=[experience.pk, highlight.pk]),
+            {},
+            "post",
+        ),
+        (
+            reverse("highlight_reorder", args=[experience.pk, highlight.pk]),
+            {"direction": "up"},
+            "post",
+        ),
+    ]
+    for url, data, method in requests:
+        response = getattr(client, method)(url, data)
         assert response.status_code == 404
 
     assert Experience.objects.get(pk=experience.pk).role == "Senior engineer"
+    assert Highlight.objects.get(pk=highlight.pk).text == "Private achievement."
