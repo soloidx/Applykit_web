@@ -93,6 +93,19 @@ def test_unverified_account_cannot_sign_in() -> None:
 
 
 @pytest.mark.django_db
+def test_authenticated_unverified_account_cannot_access_private_dashboard() -> None:
+    account = Account.objects.create_user("candidate@example.com", "a-secure-password")
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("dashboard"))
+
+    assert response.status_code == 302
+    assert response.url == reverse("account_login")
+    assert client.get(reverse("dashboard")).status_code == 302
+
+
+@pytest.mark.django_db
 def test_private_dashboard_redirects_anonymous_users_to_sign_in() -> None:
     response = Client().get(reverse("dashboard"))
 
