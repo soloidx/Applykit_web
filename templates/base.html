@@ -23,6 +23,15 @@
         {% endif %}
       </nav>
     </header>
-    <main>{% block content %}{% endblock %}</main>
+    <main>
+      {% if messages %}
+      <div class="mx-auto max-w-6xl px-6 pt-6" aria-live="polite">
+        {% for message in messages %}
+        <p class="rounded-xl bg-cream px-4 py-3 text-sm text-ink/80">{{ message }}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
   </body>
 </html>

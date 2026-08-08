@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{% if application %}Edit application{% else %}New application{% endif %} | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-3xl px-6 py-16 sm:py-24">
+  <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'dashboard' %}">Back to workspace</a>
+  <h1 class="mt-5 font-display text-5xl font-semibold tracking-tight">{% if application %}Edit draft application{% else %}Add a draft application{% endif %}</h1>
+  {% if not application %}
+  <form class="mt-8 flex gap-2" method="get">
+    <label class="sr-only" for="company-search">Search shared companies</label>
+    <input class="w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="company-search" name="q" value="{{ company_query }}" type="search" placeholder="Search shared companies">
+    <button class="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Search</button>
+  </form>
+  {% endif %}
+  <form class="mt-10 grid gap-5 rounded-[2rem] border border-ink/10 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10" method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% if application %}
+    <div>
+      <p class="text-sm font-semibold">Company</p>
+      <p class="mt-1 text-ink/70">{{ application.company.name }}{% if application.company.canonical_domain %} · {{ application.company.canonical_domain }}{% endif %}</p>
+    </div>
+    {% else %}
+    <div>
+      <label class="text-sm font-semibold" for="{{ form.company.id_for_label }}">Existing company</label>
+      <select class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.company.id_for_label }}" name="{{ form.company.html_name }}">
+        <option value="">Choose an existing company</option>
+        {% for company in form.company.field.queryset %}
+        <option value="{{ company.pk }}"{% if form.company.value|stringformat:"s" == company.pk|stringformat:"s" %} selected{% endif %}>{{ company.name }}{% if company.canonical_domain %} · {{ company.canonical_domain }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <p class="text-sm text-ink/60">Or contribute a new shared company identity.</p>
+    <div>
+      <label class="text-sm font-semibold" for="{{ form.company_name.id_for_label }}">Company name</label>
+      <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.company_name.id_for_label }}" name="{{ form.company_name.html_name }}" value="{{ form.company_name.value|default_if_none:'' }}">
+      {{ form.company_name.errors }}
+    </div>
+    <div>
+      <label class="text-sm font-semibold" for="{{ form.website.id_for_label }}">Website (optional)</label>
+      <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.website.id_for_label }}" name="{{ form.website.html_name }}" value="{{ form.website.value|default_if_none:'' }}">
+      {{ form.website.errors }}
+    </div>
+    {% endif %}
+    {% for field in form.visible_fields %}
+      {% if field.name != "company" and field.name != "company_name" and field.name != "website" %}
+      <div>
+        <label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {% if field.name == "job_description" or field.name == "private_notes" %}
+        <textarea class="mt-2 min-h-28 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ field.id_for_label }}" name="{{ field.html_name }}">{{ field.value|default_if_none:'' }}</textarea>
+        {% else %}
+        <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ field.id_for_label }}" name="{{ field.html_name }}" type="{% if field.name == 'posting_url' %}url{% else %}text{% endif %}" value="{{ field.value|default_if_none:'' }}"{% if field.field.required %} required{% endif %}>
+        {% endif %}
+        {{ field.errors }}
+      </div>
+      {% endif %}
+    {% endfor %}
+    <button class="justify-self-start rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">{% if application %}Save application{% else %}Create draft{% endif %}</button>
+  </form>
+</section>
+{% endblock %}

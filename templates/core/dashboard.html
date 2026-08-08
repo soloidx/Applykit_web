@@ -24,11 +24,12 @@
          <button class="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Archive campaign</button>
        </form>
      </div>
-     <div class="mt-8 grid gap-4 sm:grid-cols-2">
+      <div class="mt-8 grid gap-4 sm:grid-cols-2">
        <div class="rounded-2xl bg-sand p-5">
          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/50">This week</p>
          <p class="mt-2 font-display text-3xl font-semibold">0 / {{ active_campaign.weekly_target }}</p>
-       </div>
+      </div>
+      <a class="mt-8 inline-block rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" href="{% url 'application_create' %}">Add a draft application</a>
        <div class="rounded-2xl bg-sand p-5">
          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/50">This month</p>
          <p class="mt-2 font-display text-3xl font-semibold">0 / {{ active_campaign.monthly_target }}</p>
