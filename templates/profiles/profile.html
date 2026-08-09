@@ -260,5 +260,11 @@
     </div>
   </section>
   {% endif %}
+  <section class="mt-10 rounded-[2rem] border border-coral/30 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:mt-14 sm:p-10" aria-labelledby="account-heading">
+    <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Account</p>
+    <h2 id="account-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Leave ApplyKit</h2>
+    <p class="mt-4 max-w-2xl leading-7 text-ink/70">Permanently delete your account and all private workspace data. Shared public Companies remain available to other candidates.</p>
+    <a class="mt-6 inline-block rounded-full border border-coral px-5 py-3 text-sm font-semibold text-coral transition hover:bg-coral hover:text-white" href="{% url 'account_delete' %}">Delete your account</a>
+  </section>
 </section>
 {% endblock %}

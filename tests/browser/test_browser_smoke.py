@@ -220,3 +220,41 @@ def test_candidate_can_schedule_complete_and_follow_a_recruitment_event_in_brows
     page.get_by_role("link", name="Back to workspace").click()
     page.wait_for_url(f"**{reverse('dashboard')}")
     assert not page.get_by_text("Interview", exact=True).is_visible()
+
+
+@pytest.mark.django_db
+def test_candidate_can_cancel_and_confirm_account_deletion_in_browser(page, live_server) -> None:
+    account = Account.objects.create_user("account-delete-browser@example.com", "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Browser Candidate",
+        timezone="America/New_York",
+    )
+
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill("account-delete-browser@example.com")
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.get_by_role("link", name="Edit your profile").click()
+    page.get_by_role("link", name="Delete your account").click()
+
+    assert page.get_by_role("heading", name="Delete your ApplyKit account?").is_visible()
+    assert page.get_by_role("alert").get_by_text("Shared public Companies").is_visible()
+    page.get_by_role("button", name="Cancel").click()
+    page.wait_for_url(f"**{reverse('profile')}")
+    assert page.get_by_role("heading", name="Leave ApplyKit").is_visible()
+
+    page.get_by_role("link", name="Delete your account").click()
+    page.get_by_role("button", name="Delete account permanently").click()
+    page.wait_for_url(f"**{reverse('home')}")
+
+    assert page.get_by_role(
+        "heading", name="Turn a scattered search into a focused campaign."
+    ).is_visible()
+    assert page.get_by_role("link", name="Sign in").is_visible()
