@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from django import forms
 
 from apps.profiles.models import (
+    IANA_TIMEZONES,
     CandidateProfile,
     Education,
     Experience,
@@ -16,7 +19,27 @@ from apps.profiles.models import (
 )
 
 
+def timezone_choices() -> list[tuple[str, str]]:
+    now = datetime.now(UTC)
+    choices: list[tuple[timedelta, str, str]] = []
+    for timezone_name in IANA_TIMEZONES:
+        offset = now.astimezone(ZoneInfo(timezone_name)).utcoffset()
+        if offset is None:
+            continue
+        total_minutes = int(offset.total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        hours, minutes = divmod(abs(total_minutes), 60)
+        label = f"UTC{sign}{hours:02d}:{minutes:02d} {timezone_name}"
+        choices.append((offset, timezone_name, label))
+    choices.sort(key=lambda choice: (choice[0], choice[1]))
+    return [(timezone_name, label) for _, timezone_name, label in choices]
+
+
 class CandidateProfileForm(forms.ModelForm):
+    timezone = forms.ChoiceField(
+        error_messages={"invalid_choice": "Enter a valid IANA timezone such as Europe/London."},
+    )
+
     class Meta:
         model = CandidateProfile
         fields = [
@@ -40,7 +63,7 @@ class CandidateProfileForm(forms.ModelForm):
             "portfolio_url": "Portfolio URL",
         }
         help_texts = {
-            "timezone": "Use an IANA timezone such as Europe/London or America/New_York.",
+            "timezone": "Choose the timezone where you plan your job search.",
             "professional_summary": "Optional. You can add this when you are ready.",
         }
         widgets = {
@@ -49,6 +72,8 @@ class CandidateProfileForm(forms.ModelForm):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        timezone_field = cast(forms.ChoiceField, self.fields["timezone"])
+        timezone_field.choices = [("", "Choose your timezone"), *timezone_choices()]
         for field in self.fields.values():
             field.widget.attrs["class"] = (
                 "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "

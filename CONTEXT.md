@@ -41,6 +41,8 @@ The profile is relational. A previously used JSON resume shape is neither the pe
 
 Only full name and timezone are required before using tracking features. All other sections are progressively completed.
 
+The timezone is stored as an IANA timezone identifier. Candidates choose it from every identifier available in the installed IANA timezone database; the selector displays each identifier with its current UTC offset, but the offset is not stored.
+
 Do not shorten this term to CV when referring to the source data. A future Resume is a document derived from this profile.
 
 ### Campaign

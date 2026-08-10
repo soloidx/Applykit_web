@@ -1,12 +1,19 @@
+from datetime import UTC, datetime
+from typing import cast
+from zoneinfo import ZoneInfo
+
 import pytest
 from allauth.account.models import EmailAddress
+from django import forms
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
+from apps.profiles.forms import CandidateProfileForm
 from apps.profiles.models import (
+    IANA_TIMEZONES,
     CandidateProfile,
     Education,
     Experience,
@@ -76,6 +83,45 @@ def test_profile_requires_full_name_and_valid_iana_timezone() -> None:
     assert b"This field is required." in response.content
     assert b"Enter a valid IANA timezone" in response.content
     assert CandidateProfile.objects.filter(account=account).exists() is False
+
+
+def test_profile_timezone_is_a_current_offset_sorted_iana_timezone_select() -> None:
+    form = CandidateProfileForm()
+    timezone_field = cast(forms.ChoiceField, form.fields["timezone"])
+    choices = list(timezone_field.choices)
+
+    assert timezone_field.widget.input_type == "select"
+    assert choices[0] == ("", "Choose your timezone")
+    assert {value for value, _ in choices[1:]} == IANA_TIMEZONES
+    assert all(label.startswith("UTC+") or label.startswith("UTC-") for _, label in choices[1:])
+    assert all(" " in label for _, label in choices[1:])
+    assert ("America/Lima", "UTC-05:00 America/Lima") in choices
+    assert ("Asia/Kathmandu", "UTC+05:45 Asia/Kathmandu") in choices
+    expected_values = sorted(
+        IANA_TIMEZONES,
+        key=lambda timezone_name: (
+            datetime.now(UTC).astimezone(ZoneInfo(timezone_name)).utcoffset(),
+            timezone_name,
+        ),
+    )
+    assert [value for value, _ in choices[1:]] == expected_values
+
+
+@pytest.mark.django_db
+def test_profile_renders_timezone_select_with_the_stored_value_selected() -> None:
+    account = verified_account("timezone-select@example.com")
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Ada Lovelace",
+        timezone="America/Lima",
+    )
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("profile"))
+
+    assert b'<select name="timezone"' in response.content
+    assert b'<option value="America/Lima" selected>' in response.content
 
 
 @pytest.mark.django_db

@@ -43,7 +43,7 @@ def test_verified_candidate_can_sign_in_and_sign_out_in_browser(page, live_serve
 
     assert page.get_by_role("heading", name="Start with the essentials.").is_visible()
     page.get_by_label("Full name").fill("Browser Candidate")
-    page.get_by_label("Timezone").fill("America/New_York")
+    page.get_by_label("Timezone").select_option("America/New_York")
     page.get_by_role("button", name="Save profile").click()
     page.wait_for_url("**/dashboard/")
 
