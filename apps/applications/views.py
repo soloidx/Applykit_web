@@ -45,6 +45,39 @@ def _redirect_or_htmx_redirect(request: HttpRequest, destination: str) -> HttpRe
 
 @login_required
 @verified_account_required
+def application_board(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    active_campaign = Campaign.objects.filter(
+        account=account,
+        status=Campaign.Status.ACTIVE,
+    ).first()
+    applications_by_stage: dict[str, list[JobApplication]] = {
+        value: [] for value, _ in JobApplication.Stage.choices
+    }
+    if active_campaign is not None:
+        applications = JobApplication.objects.filter(
+            account=account,
+            campaign=active_campaign,
+        ).select_related("company").order_by("-updated_at", "-pk")
+        for application in applications:
+            applications_by_stage[application.stage].append(application)
+    stage_columns = [
+        {
+            "value": value,
+            "label": label,
+            "applications": applications_by_stage[value],
+        }
+        for value, label in JobApplication.Stage.choices
+    ]
+    return render(
+        request,
+        "applications/board.html",
+        {"active_campaign": active_campaign, "stage_columns": stage_columns},
+    )
+
+
+@login_required
+@verified_account_required
 def application_create(request: HttpRequest) -> HttpResponse:
     account = cast(Account, request.user)
     campaign = get_object_or_404(Campaign, account=account, status=Campaign.Status.ACTIVE)

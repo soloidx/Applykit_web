@@ -87,6 +87,12 @@ An append-only, timestamped record of a Job Application changing from one Applic
 
 The first transition into `Submitted` sets the immutable first submission time. Moving to another stage does not clear or replace that time.
 
+### Applications Board
+
+The read-only view of the Active Campaign's Job Applications, grouped into one column for each Application Stage. It shows all applications in each column with the most recently updated first. Each card links the role title to the Job Application detail page and shows the Company name as supporting context.
+
+The board does not change Application Stages or expose other application mutations. Those actions remain on the Job Application detail page so stage changes continue through the operation that records a Stage Transition. If there is no Active Campaign, the board shows all seven empty stage columns and does not offer application creation.
+
 ### Recruitment Event
 
 A candidate-owned upcoming or historical item attached to a Job Application. Event types are `Follow-up`, `Interview`, `Assessment`, `Deadline`, `Offer response`, and `Custom`. An event is `Scheduled`, `Completed`, or `Cancelled`.

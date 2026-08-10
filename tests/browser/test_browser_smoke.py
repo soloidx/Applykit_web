@@ -58,6 +58,58 @@ def test_verified_candidate_can_sign_in_and_sign_out_in_browser(page, live_serve
 
 
 @pytest.mark.django_db
+def test_candidate_can_use_mobile_navigation_and_read_only_applications_board(
+    page, live_server
+) -> None:
+    account = Account.objects.create_user("board-browser@example.com", "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Board Candidate",
+        timezone="America/New_York",
+    )
+    Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="America/New_York",
+    )
+    company = Company.objects.create(name="Example Careers")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill("board-browser@example.com")
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.get_by_text("Menu", exact=True).click()
+    page.get_by_role("link", name="Applications").click()
+
+    board = page.locator('[aria-label="Applications by stage"]')
+    assert page.get_by_role("heading", name="Draft").is_visible()
+    assert page.get_by_role("heading", name="Submitted").is_visible()
+    assert page.get_by_role("heading", name="Interviewing").is_visible()
+    assert page.get_by_role("heading", name="Offer").is_visible()
+    assert page.get_by_role("heading", name="Accepted").is_visible()
+    assert page.get_by_role("heading", name="Rejected").is_visible()
+    assert page.get_by_role("heading", name="Withdrawn").is_visible()
+    assert board.evaluate("element => element.scrollWidth > element.clientWidth")
+    page.get_by_role("link", name="Platform engineer").click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+
+
+@pytest.mark.django_db
 def test_candidate_can_update_stage_and_see_history_and_progress_in_browser(
     page, live_server
 ) -> None:

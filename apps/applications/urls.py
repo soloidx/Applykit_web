@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.applications.views import (
+    application_board,
     application_create,
     application_delete,
     application_detail,
@@ -10,6 +11,7 @@ from apps.applications.views import (
 )
 
 urlpatterns = [
+    path("applications/", application_board, name="application_board"),
     path("applications/new/", application_create, name="application_create"),
     path("applications/<int:application_id>/", application_detail, name="application_detail"),
     path("applications/<int:application_id>/edit/", application_edit, name="application_edit"),

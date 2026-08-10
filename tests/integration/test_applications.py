@@ -40,6 +40,93 @@ def verified_candidate(email: str) -> Account:
 
 
 @pytest.mark.django_db
+def test_applications_board_shows_active_campaign_applications_in_all_stage_columns() -> None:
+    account = verified_candidate("board-candidate@example.com")
+    active_campaign = Campaign.objects.get(account=account, status=Campaign.Status.ACTIVE)
+    archived_campaign = Campaign.objects.create(
+        account=account,
+        weekly_target=3,
+        monthly_target=12,
+        timezone="Europe/London",
+        status=Campaign.Status.ARCHIVED,
+    )
+    company = Company.objects.create(name="Example Careers")
+    older = JobApplication.objects.create(
+        account=account,
+        campaign=active_campaign,
+        company=company,
+        role_title="Older platform engineer",
+        job_description="Build dependable systems.",
+    )
+    newer = JobApplication.objects.create(
+        account=account,
+        campaign=active_campaign,
+        company=company,
+        role_title="Newer platform engineer",
+        job_description="Build dependable systems.",
+    )
+    JobApplication.objects.create(
+        account=account,
+        campaign=archived_campaign,
+        company=company,
+        role_title="Archived platform engineer",
+        job_description="Build dependable systems.",
+    )
+    JobApplication.objects.filter(pk=older.pk).update(updated_at=timezone.now() - timedelta(days=1))
+    JobApplication.objects.filter(pk=newer.pk).update(updated_at=timezone.now())
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("application_board"))
+    content = response.content.decode()
+
+    assert response.status_code == 200
+    for stage in JobApplication.Stage:
+        assert f'id="stage-{stage.value}-heading"' in content
+        assert stage.label in content
+    assert "Newer platform engineer" in content
+    assert "Older platform engineer" in content
+    assert "Archived platform engineer" not in content
+    assert content.index("Newer platform engineer") < content.index("Older platform engineer")
+    assert reverse("application_detail", args=[newer.pk]) in content
+    assert 'href="/applications/"' in content
+    assert content.count('aria-current="page"') == 2
+
+
+@pytest.mark.django_db
+def test_applications_board_shows_empty_columns_without_an_active_campaign() -> None:
+    account = verified_candidate("empty-board@example.com")
+    Campaign.objects.filter(account=account).update(status=Campaign.Status.ARCHIVED)
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("application_board"))
+
+    assert response.status_code == 200
+    assert response.content.count(b"No applications in this stage.") == len(JobApplication.Stage)
+    assert b"Add draft application" not in response.content
+
+
+@pytest.mark.django_db
+def test_authenticated_navigation_marks_dashboard_and_profile_sections() -> None:
+    account = verified_candidate("navigation@example.com")
+    client = Client()
+    client.force_login(account)
+
+    dashboard = client.get(reverse("dashboard"))
+    profile = client.get(reverse("profile"))
+    nested_profile = client.get(reverse("experience_create"))
+
+    assert dashboard.content.count(b'aria-current="page"') == 2
+    assert profile.content.count(b'aria-current="page"') == 2
+    assert nested_profile.content.count(b'aria-current="page"') == 2
+    assert b'href="/dashboard/"' in dashboard.content
+    assert b'href="/profile/"' in profile.content
+    assert b'href="/applications/"' in dashboard.content
+    assert b'Sign out' in dashboard.content
+
+
+@pytest.mark.django_db
 def test_company_website_is_normalized_to_its_registrable_idna_domain() -> None:
     company, created = create_or_reuse_company(
         name="Example Careers",
