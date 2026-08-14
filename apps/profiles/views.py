@@ -26,9 +26,9 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
+    ProfileSkill,
     Project,
     ProjectSkill,
-    Skill,
 )
 from apps.skills.services import resolve_skill_label
 
@@ -75,7 +75,7 @@ def _profile_context(
         else ProjectSkillForm(),
         "project_skill_project": project_skill_project,
         "project": project_skill_project,
-        "skills": candidate_profile.skills.all(),
+        "skills": candidate_profile.profile_skills.all(),
         "skill_form": skill_form
         if skill_form is not None
         else SkillForm(profile=candidate_profile),
@@ -120,8 +120,8 @@ def _project_skill_for_account(account: Account, project_skill_id: int) -> Proje
     )
 
 
-def _skill_for_account(account: Account, skill_id: int) -> Skill:
-    return get_object_or_404(Skill, pk=skill_id, profile__account=account)
+def _skill_for_account(account: Account, skill_id: int) -> ProfileSkill:
+    return get_object_or_404(ProfileSkill, pk=skill_id, profile__account=account)
 
 
 def _language_for_account(account: Account, language_id: int) -> Language:
@@ -167,9 +167,9 @@ def _normalize_project_skill_positions(project: Project) -> None:
 
 
 def _normalize_skill_positions(profile: CandidateProfile) -> None:
-    for position, skill in enumerate(profile.skills.order_by("position", "id")):
+    for position, skill in enumerate(profile.profile_skills.order_by("position", "id")):
         if skill.position != position:
-            Skill.objects.filter(pk=skill.pk).update(position=position)
+            ProfileSkill.objects.filter(pk=skill.pk).update(position=position)
 
 
 def _normalize_language_positions(profile: CandidateProfile) -> None:
@@ -649,17 +649,20 @@ def skill_create(request: HttpRequest) -> HttpResponse:
                 locked_profile = CandidateProfile.objects.select_for_update().get(
                     pk=candidate_profile.pk
                 )
-                normalized_name = form.cleaned_data["name"].casefold()
-                if Skill.objects.filter(
+                entered_label = form.cleaned_data["name"]
+                concept, _ = resolve_skill_label(entered_label)
+                if ProfileSkill.objects.filter(
                     profile=locked_profile,
-                    normalized_name=normalized_name,
+                    concept=concept,
                 ).exists():
                     form.add_error("name", "This skill is already in your profile.")
                 else:
-                    skill = form.save(commit=False)
-                    skill.profile = locked_profile
-                    skill.position = locked_profile.skills.count()
-                    skill.save()
+                    ProfileSkill.objects.create(
+                        profile=locked_profile,
+                        concept=concept,
+                        label=entered_label,
+                        position=locked_profile.profile_skills.count(),
+                    )
         except IntegrityError:
             form.add_error("name", "This skill is already in your profile.")
         if not form.errors:
@@ -703,13 +706,13 @@ def skill_reorder(request: HttpRequest, skill_id: int) -> HttpResponse:
 
     with transaction.atomic():
         profile = CandidateProfile.objects.select_for_update().get(pk=skill.profile_id)
-        skills = list(profile.skills.order_by("position", "id"))
+        skills = list(profile.profile_skills.order_by("position", "id"))
         index = skills.index(skill)
         swap_index = index - 1 if direction == "up" else index + 1
         if 0 <= swap_index < len(skills):
             skills[index], skills[swap_index] = skills[swap_index], skills[index]
             for position, item in enumerate(skills):
-                Skill.objects.filter(pk=item.pk).update(position=position)
+                ProfileSkill.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
 
 

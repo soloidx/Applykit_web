@@ -223,34 +223,52 @@ class ProjectSkill(models.Model):
         super().save(*args, **kwargs)
 
 
-class Skill(models.Model):
+class ProfileSkill(models.Model):
     profile = models.ForeignKey(
         CandidateProfile,
         on_delete=models.CASCADE,
-        related_name="skills",
+        related_name="profile_skills",
     )
-    name = models.CharField(max_length=100)
-    normalized_name = models.CharField(max_length=100, editable=False)
+    concept = models.ForeignKey(
+        SkillConcept,
+        on_delete=models.PROTECT,
+        related_name="profile_skills",
+    )
+    label = models.CharField(max_length=200)
+    normalized_label = models.CharField(max_length=200, editable=False)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["position", "id"]
+        db_table = "profiles_skill"
         constraints = [
             models.UniqueConstraint(
-                fields=["profile", "normalized_name"],
-                name="skill_unique_name_per_profile",
-            )
+                fields=["profile", "concept"],
+                name="profile_skill_unique_concept",
+            ),
+            models.CheckConstraint(
+                condition=~Q(normalized_label=""),
+                name="profile_skill_label_not_blank",
+            ),
         ]
 
     def __str__(self) -> str:
-        return self.name
+        return self.label
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.name = self.name.strip()
-        self.normalized_name = self.name.casefold()
+        self.label = self.label.strip()
+        self.normalized_label = normalize_skill_label(self.label)
+        if not self.normalized_label:
+            raise ValidationError("Enter a hard-skill label.")
+        if self.concept_id is None:
+            from apps.skills.services import resolve_skill_label
+
+            self.concept, _ = resolve_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_skill = (
-                Skill.objects.filter(profile=self.profile).order_by("-position", "-id").first()
+                ProfileSkill.objects.filter(profile=self.profile)
+                .order_by("-position", "-id")
+                .first()
             )
             self.position = last_skill.position + 1 if last_skill else 0
         super().save(*args, **kwargs)

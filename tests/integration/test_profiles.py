@@ -19,9 +19,9 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
+    ProfileSkill,
     Project,
     ProjectSkill,
-    Skill,
 )
 from apps.skills.models import SkillAlias, SkillConcept
 from apps.skills.services import resolve_skill_label
@@ -934,28 +934,74 @@ def test_candidate_can_manage_ordered_unique_skills() -> None:
         skill_data(name="Django"),
         headers={"HX-Request": "true"},
     )
+    third_response = client.post(reverse("skill_create"), skill_data(name="Rust"))
     duplicate_response = client.post(reverse("skill_create"), skill_data(name=" python "))
     whitespace_response = client.post(reverse("skill_create"), skill_data(name="   "))
 
     assert first_response.url == reverse("profile")
     assert second_response.headers["HX-Redirect"] == reverse("profile")
+    assert third_response.url == reverse("profile")
     assert duplicate_response.status_code == 200
     assert whitespace_response.status_code == 200
     assert b"Enter a skill." in whitespace_response.content
     assert b"already" in duplicate_response.content
-    assert list(Skill.objects.values_list("name", flat=True)) == ["Python", "Django"]
+    assert list(ProfileSkill.objects.values_list("label", flat=True)) == [
+        "Python",
+        "Django",
+        "Rust",
+    ]
 
-    first, second = Skill.objects.order_by("position")
-    reorder_response = client.post(
+    first, second, _third = ProfileSkill.objects.order_by("position")
+    full_page_reorder_response = client.post(
         reverse("skill_reorder", args=[second.pk]),
         {"direction": "up"},
     )
-    delete_response = client.post(reverse("skill_delete", args=[first.pk]))
+    htmx_reorder_response = client.post(
+        reverse("skill_reorder", args=[second.pk]),
+        {"direction": "down"},
+        headers={"HX-Request": "true"},
+    )
+    full_page_delete_response = client.post(reverse("skill_delete", args=[first.pk]))
+    htmx_delete_response = client.post(
+        reverse("skill_delete", args=[second.pk]),
+        headers={"HX-Request": "true"},
+    )
 
-    assert reorder_response.url == reverse("profile")
-    assert delete_response.url == reverse("profile")
-    assert list(Skill.objects.values_list("name", flat=True)) == ["Django"]
-    assert Skill.objects.get().position == 0
+    assert full_page_reorder_response.url == reverse("profile")
+    assert htmx_reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert full_page_delete_response.url == reverse("profile")
+    assert htmx_delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(ProfileSkill.objects.values_list("label", flat=True)) == ["Rust"]
+    assert ProfileSkill.objects.get().position == 0
+
+
+@pytest.mark.django_db
+def test_profile_skills_resolve_catalog_aliases_and_preserve_entered_labels() -> None:
+    account = verified_account("profile-skill-catalog@example.com")
+    profile = create_profile(account)
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="nodejs")
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(reverse("skill_create"), skill_data(name="NodeJS"))
+    duplicate_response = client.post(
+        reverse("skill_create"),
+        skill_data(name="node.js"),
+        headers={"HX-Request": "true"},
+    )
+    unknown_response = client.post(
+        reverse("skill_create"),
+        skill_data(name="  Elixir  "),
+    )
+
+    assert first_response.url == reverse("profile")
+    assert duplicate_response.status_code == 200
+    assert b"already in your profile" in duplicate_response.content
+    assert unknown_response.url == reverse("profile")
+    assert list(
+        ProfileSkill.objects.filter(profile=profile).values_list("label", "concept__canonical_name")
+    ) == [("NodeJS", "Node.js"), ("Elixir", "Elixir")]
 
 
 @pytest.mark.django_db
@@ -1011,7 +1057,13 @@ def test_skill_and_language_operations_cannot_cross_account_boundaries() -> None
     intruder = verified_account("intruder@example.com")
     profile = create_profile(owner)
     create_profile(intruder)
-    skill = Skill.objects.create(profile=profile, name="Python", position=0)
+    concept, _ = resolve_skill_label("Python")
+    skill = ProfileSkill.objects.create(
+        profile=profile,
+        concept=concept,
+        label="Python",
+        position=0,
+    )
     language = Language.objects.create(
         profile=profile,
         name="English",
@@ -1032,5 +1084,5 @@ def test_skill_and_language_operations_cannot_cross_account_boundaries() -> None
         response = getattr(client, method)(url, data)
         assert response.status_code == 404
 
-    assert Skill.objects.get(pk=skill.pk).name == "Python"
+    assert ProfileSkill.objects.get(pk=skill.pk).label == "Python"
     assert Language.objects.get(pk=language.pk).name == "English"

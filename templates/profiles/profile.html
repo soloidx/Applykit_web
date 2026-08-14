@@ -231,20 +231,20 @@
     <div class="mt-8 flex flex-wrap gap-3">
       {% for skill in skills %}
       <div class="flex items-center gap-2 rounded-full border border-ink/10 bg-sand/70 px-4 py-2 text-sm font-semibold">
-        <span>{{ skill.name }}</span>
+        <span>{{ skill.label }}</span>
         <form method="post" action="{% url 'skill_delete' skill.pk %}">
           {% csrf_token %}
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ skill.name }}">Remove</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ skill.label }}">Remove</button>
         </form>
         <form method="post" action="{% url 'skill_reorder' skill.pk %}">
           {% csrf_token %}
           <input type="hidden" name="direction" value="up">
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.name }} up">&uarr;</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.label }} up">&uarr;</button>
         </form>
         <form method="post" action="{% url 'skill_reorder' skill.pk %}">
           {% csrf_token %}
           <input type="hidden" name="direction" value="down">
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.name }} down">&darr;</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.label }} down">&darr;</button>
         </form>
       </div>
       {% empty %}

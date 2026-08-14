@@ -23,11 +23,12 @@ from apps.profiles.models import (
     Experience,
     Highlight,
     Language,
+    ProfileSkill,
     Project,
     ProjectSkill,
-    Skill,
 )
 from apps.skills.models import SkillConcept
+from apps.skills.services import resolve_skill_label
 
 pytestmark = pytest.mark.integration
 
@@ -66,7 +67,8 @@ def create_private_data(account: Account, company: Company) -> JobApplication:
         start_date="2015-01-01",
     )
     Project.objects.create(profile=profile, name="Analytical engine simulator")
-    Skill.objects.create(profile=profile, name="Python")
+    concept, _ = resolve_skill_label("Python")
+    ProfileSkill.objects.create(profile=profile, concept=concept, label="Python")
     Language.objects.create(
         profile=profile,
         name="English",
@@ -151,7 +153,7 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     assert not Education.objects.filter(profile_id=profile_id).exists()
     assert not Project.objects.filter(profile_id=profile_id).exists()
     assert not ProjectSkill.objects.filter(project_id=project.pk).exists()
-    assert not Skill.objects.filter(profile_id=profile_id).exists()
+    assert not ProfileSkill.objects.filter(profile_id=profile_id).exists()
     assert not Language.objects.filter(profile_id=profile_id).exists()
     assert not Campaign.objects.filter(account_id=account.pk).exists()
     assert not JobApplication.objects.filter(account_id=account.pk).exists()
@@ -160,6 +162,7 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     assert Company.objects.filter(pk=company.pk, name="Example Careers").exists()
     assert CompanyDomainAlias.objects.filter(pk=alias.pk, company=company).exists()
     assert SkillConcept.objects.filter(pk=concept.pk).exists()
+    assert SkillConcept.objects.filter(canonical_key="python").exists()
     retained_application.refresh_from_db()
     assert retained_application.company_id == company.pk
     assert retained_application.private_notes == "Other candidate private note."
@@ -192,7 +195,7 @@ def test_account_deletion_rolls_back_when_account_removal_fails(
     assert Highlight.objects.filter(experience__profile_id=profile_id).exists()
     assert Education.objects.filter(profile_id=profile_id).exists()
     assert Project.objects.filter(profile_id=profile_id).exists()
-    assert Skill.objects.filter(profile_id=profile_id).exists()
+    assert ProfileSkill.objects.filter(profile_id=profile_id).exists()
     assert Language.objects.filter(profile_id=profile_id).exists()
     assert Campaign.objects.filter(account=account).exists()
     assert JobApplication.objects.filter(pk=application.pk).exists()

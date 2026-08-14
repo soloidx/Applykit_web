@@ -14,7 +14,6 @@ from apps.profiles.models import (
     Highlight,
     Language,
     Project,
-    Skill,
     validate_iana_timezone,
 )
 
@@ -226,22 +225,12 @@ class ProjectSkillForm(forms.Form):
         return label
 
 
-class SkillForm(forms.ModelForm):
-    name = forms.CharField(strip=False, label="Skill")
+class SkillForm(forms.Form):
+    name = forms.CharField(max_length=200, strip=False, label="Skill")
 
-    class Meta:
-        model = Skill
-        fields = ["name"]
-        labels = {"name": "Skill"}
-
-    def __init__(
-        self,
-        *args: Any,
-        profile: CandidateProfile | None = None,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, *args: Any, profile: CandidateProfile | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.profile = profile or getattr(self.instance, "profile", None)
+        self.profile = profile
         self.fields["name"].widget.attrs["class"] = (
             "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
             "text-ink outline-none transition placeholder:text-ink/35 "
@@ -252,16 +241,6 @@ class SkillForm(forms.ModelForm):
         name = self.cleaned_data["name"].strip()
         if not name:
             raise forms.ValidationError("Enter a skill.")
-        if (
-            self.profile
-            and Skill.objects.filter(
-                profile=self.profile,
-                normalized_name=name.casefold(),
-            )
-            .exclude(pk=self.instance.pk)
-            .exists()
-        ):
-            raise forms.ValidationError("This skill is already in your profile.")
         return name
 
 
