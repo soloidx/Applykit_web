@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.profiles",
     "apps.campaigns",
     "apps.applications",
+    "apps.skills",
     "apps.core",
 ]
 
