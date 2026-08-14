@@ -1,0 +1,11 @@
+<div id="project-skill-form-{{ project.pk }}">
+  <form method="post" action="{% url 'project_skill_create' project.pk %}" class="flex flex-col gap-3 sm:flex-row sm:items-end" hx-post="{% url 'project_skill_create' project.pk %}" hx-target="#project-skill-form-{{ project.pk }}" hx-swap="outerHTML">
+    {% csrf_token %}
+    <div class="min-w-0 flex-1">
+      <label class="text-sm font-semibold text-ink" for="{{ project_skill_form.label.id_for_label }}-{{ project.pk }}">Add structured hard skill</label>
+      <input class="mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 text-ink outline-none transition placeholder:text-ink/35 focus:border-coral focus:ring-2 focus:ring-coral/20" id="{{ project_skill_form.label.id_for_label }}-{{ project.pk }}" name="label" type="text" value="{% if project_skill_project and project_skill_project.pk == project.pk %}{{ project_skill_form.label.value|default:'' }}{% endif %}">
+      {% if project_skill_project and project_skill_project.pk == project.pk %}{% for error in project_skill_form.label.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}{% endif %}
+    </div>
+    <button class="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Add skill</button>
+  </form>
+</div>

@@ -20,8 +20,11 @@ from apps.profiles.models import (
     Highlight,
     Language,
     Project,
+    ProjectSkill,
     Skill,
 )
+from apps.skills.models import SkillAlias, SkillConcept
+from apps.skills.services import resolve_skill_label
 
 pytestmark = pytest.mark.integration
 
@@ -632,6 +635,187 @@ def test_project_htmx_validation_and_success_match_ordinary_persistence() -> Non
     assert valid_response.status_code == 200
     assert valid_response.headers["HX-Redirect"] == reverse("profile")
     assert Project.objects.filter(name="Analytical Engine Visualizer", url="").exists()
+
+
+@pytest.mark.django_db
+def test_candidate_can_add_a_project_skill_through_the_shared_catalog() -> None:
+    account = verified_account("project-skills@example.com")
+    profile = create_profile(account)
+    project = Project.objects.create(
+        profile=profile,
+        name="Legacy project",
+        technologies="Python, Django",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="nodejs")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("project_skill_create", args=[project.pk]),
+        {"label": " NodeJS "},
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("profile")
+    project_skill = ProjectSkill.objects.get(project=project)
+    assert project_skill.label == "NodeJS"
+    assert project_skill.concept_id == concept.pk
+    assert project_skill.position == 0
+    profile_response = client.get(reverse("profile"))
+    assert b"Python, Django" in profile_response.content
+    assert b"NodeJS" in profile_response.content
+
+
+@pytest.mark.django_db
+def test_project_skills_resolve_aliases_create_unknown_concepts_and_are_unique_per_project() -> (
+    None
+):
+    account = verified_account("project-skill-catalog@example.com")
+    profile = create_profile(account)
+    first_project = Project.objects.create(profile=profile, name="First project")
+    second_project = Project.objects.create(profile=profile, name="Second project")
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="nodejs")
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(
+        reverse("project_skill_create", args=[first_project.pk]),
+        {"label": "NodeJS"},
+    )
+    duplicate_response = client.post(
+        reverse("project_skill_create", args=[first_project.pk]),
+        {"label": " node.js "},
+    )
+    second_response = client.post(
+        reverse("project_skill_create", args=[second_project.pk]),
+        {"label": "node.js"},
+    )
+    unknown_response = client.post(
+        reverse("project_skill_create", args=[first_project.pk]),
+        {"label": "  Elixir  "},
+        headers={"HX-Request": "true"},
+    )
+    catalog_count_before_blank = SkillConcept.objects.count()
+    blank_response = client.post(
+        reverse("project_skill_create", args=[first_project.pk]),
+        {"label": "  "},
+        headers={"HX-Request": "true"},
+    )
+
+    assert first_response.url == reverse("profile")
+    assert duplicate_response.status_code == 200
+    assert b"already used in this project" in duplicate_response.content
+    assert second_response.url == reverse("profile")
+    assert unknown_response.headers["HX-Redirect"] == reverse("profile")
+    assert blank_response.status_code == 200
+    assert b"Enter a hard-skill label" in blank_response.content
+    assert ProjectSkill.objects.filter(project=first_project, concept=concept).count() == 1
+    assert ProjectSkill.objects.filter(project=second_project, concept=concept).count() == 1
+    assert (
+        ProjectSkill.objects.get(project=first_project, label="Elixir").concept.canonical_name
+        == "Elixir"
+    )
+    assert SkillConcept.objects.count() == catalog_count_before_blank
+
+
+@pytest.mark.django_db
+def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on_edit() -> None:
+    account = verified_account("project-skill-management@example.com")
+    profile = create_profile(account)
+    project = Project.objects.create(
+        profile=profile,
+        name="Legacy project",
+        technologies="Python, Django",
+    )
+    client = Client()
+    client.force_login(account)
+
+    client.post(reverse("project_skill_create", args=[project.pk]), {"label": "Python"})
+    client.post(reverse("project_skill_create", args=[project.pk]), {"label": "Django"})
+    first, second = ProjectSkill.objects.order_by("position")
+
+    edit_response = client.post(
+        reverse("project_edit", args=[project.pk]),
+        project_data(name="Renamed project", technologies=""),
+        headers={"HX-Request": "true"},
+    )
+    reorder_response = client.post(
+        reverse("project_skill_reorder", args=[second.pk]),
+        {"direction": "up"},
+    )
+    htmx_reorder_response = client.post(
+        reverse("project_skill_reorder", args=[second.pk]),
+        {"direction": "down"},
+        headers={"HX-Request": "true"},
+    )
+    project.refresh_from_db()
+
+    assert edit_response.headers["HX-Redirect"] == reverse("profile")
+    assert reorder_response.url == reverse("profile")
+    assert htmx_reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(project.project_skills.values_list("label", flat=True)) == ["Python", "Django"]
+
+    delete_response = client.post(
+        reverse("project_skill_delete", args=[first.pk]),
+        headers={"HX-Request": "true"},
+    )
+
+    project.refresh_from_db()
+    assert delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert project.technologies == "Python, Django"
+    assert list(project.project_skills.values_list("label", flat=True)) == ["Django"]
+    assert project.project_skills.get().position == 0
+
+
+@pytest.mark.django_db
+def test_project_skill_mutations_cannot_cross_account_boundaries() -> None:
+    owner = verified_account("project-skill-owner@example.com")
+    intruder = verified_account("project-skill-intruder@example.com")
+    owner_profile = create_profile(owner)
+    create_profile(intruder)
+    project = Project.objects.create(profile=owner_profile, name="Private project")
+    concept, _ = resolve_skill_label("Python")
+    project_skill = ProjectSkill.objects.create(
+        project=project,
+        concept=concept,
+        label="Python",
+        position=0,
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    requests = [
+        (reverse("project_skill_create", args=[project.pk]), {"label": "Django"}),
+        (reverse("project_skill_delete", args=[project_skill.pk]), {}),
+        (
+            reverse("project_skill_reorder", args=[project_skill.pk]),
+            {"direction": "up"},
+        ),
+    ]
+    for url, data in requests:
+        response = client.post(url, data)
+        assert response.status_code == 404
+
+    assert ProjectSkill.objects.get(pk=project_skill.pk).label == "Python"
+
+
+@pytest.mark.django_db
+def test_deleting_a_project_removes_private_project_skills_but_not_catalog_data() -> None:
+    account = verified_account("project-skill-delete-project@example.com")
+    profile = create_profile(account)
+    project = Project.objects.create(profile=profile, name="Disposable project")
+    concept, _ = resolve_skill_label("Python")
+    ProjectSkill.objects.create(project=project, concept=concept, label="Python")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(reverse("project_delete", args=[project.pk]))
+
+    assert response.url == reverse("profile")
+    assert not ProjectSkill.objects.filter(project=project).exists()
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
 
 
 @pytest.mark.django_db

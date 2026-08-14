@@ -24,8 +24,10 @@ from apps.profiles.models import (
     Highlight,
     Language,
     Project,
+    ProjectSkill,
     Skill,
 )
+from apps.skills.models import SkillConcept
 
 pytestmark = pytest.mark.integration
 
@@ -123,6 +125,9 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     alias = CompanyDomainAlias.objects.create(company=company, domain="example.org")
     deleted_application = create_private_data(account, company)
     profile_id = CandidateProfile.objects.get(account=account).pk
+    project = Project.objects.get(profile_id=profile_id)
+    concept = SkillConcept.objects.create(canonical_name="Django")
+    ProjectSkill.objects.create(project=project, concept=concept, label="Django")
     retained_application = JobApplication.objects.create(
         account=other_account,
         campaign=Campaign.objects.get(account=other_account),
@@ -145,6 +150,7 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     assert not Highlight.objects.filter(experience__profile_id=profile_id).exists()
     assert not Education.objects.filter(profile_id=profile_id).exists()
     assert not Project.objects.filter(profile_id=profile_id).exists()
+    assert not ProjectSkill.objects.filter(project_id=project.pk).exists()
     assert not Skill.objects.filter(profile_id=profile_id).exists()
     assert not Language.objects.filter(profile_id=profile_id).exists()
     assert not Campaign.objects.filter(account_id=account.pk).exists()
@@ -153,6 +159,7 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     assert not RecruitmentEvent.objects.filter(application_id=deleted_application.pk).exists()
     assert Company.objects.filter(pk=company.pk, name="Example Careers").exists()
     assert CompanyDomainAlias.objects.filter(pk=alias.pk, company=company).exists()
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
     retained_application.refresh_from_db()
     assert retained_application.company_id == company.pk
     assert retained_application.private_notes == "Other candidate private note."

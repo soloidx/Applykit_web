@@ -17,6 +17,7 @@ from apps.profiles.forms import (
     HighlightForm,
     LanguageForm,
     ProjectForm,
+    ProjectSkillForm,
     SkillForm,
 )
 from apps.profiles.models import (
@@ -26,8 +27,10 @@ from apps.profiles.models import (
     Highlight,
     Language,
     Project,
+    ProjectSkill,
     Skill,
 )
+from apps.skills.services import resolve_skill_label
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -46,6 +49,8 @@ def _profile_context(
     education_form_action: str | None = None,
     project_form: ProjectForm | None = None,
     project_form_action: str | None = None,
+    project_skill_form: ProjectSkillForm | None = None,
+    project_skill_project: Project | None = None,
     skill_form: SkillForm | None = None,
     skill_form_action: str | None = None,
     language_form: LanguageForm | None = None,
@@ -65,6 +70,11 @@ def _profile_context(
         "projects": candidate_profile.projects.all(),
         "project_form": project_form if project_form is not None else ProjectForm(),
         "project_form_action": project_form_action or reverse("project_create"),
+        "project_skill_form": project_skill_form
+        if project_skill_form is not None
+        else ProjectSkillForm(),
+        "project_skill_project": project_skill_project,
+        "project": project_skill_project,
         "skills": candidate_profile.skills.all(),
         "skill_form": skill_form
         if skill_form is not None
@@ -100,6 +110,14 @@ def _education_for_account(account: Account, education_id: int) -> Education:
 
 def _project_for_account(account: Account, project_id: int) -> Project:
     return get_object_or_404(Project, pk=project_id, profile__account=account)
+
+
+def _project_skill_for_account(account: Account, project_skill_id: int) -> ProjectSkill:
+    return get_object_or_404(
+        ProjectSkill,
+        pk=project_skill_id,
+        project__profile__account=account,
+    )
 
 
 def _skill_for_account(account: Account, skill_id: int) -> Skill:
@@ -140,6 +158,12 @@ def _normalize_project_positions(profile: CandidateProfile) -> None:
     for position, project in enumerate(profile.projects.order_by("position", "id")):
         if project.position != position:
             Project.objects.filter(pk=project.pk).update(position=position)
+
+
+def _normalize_project_skill_positions(project: Project) -> None:
+    for position, project_skill in enumerate(project.project_skills.order_by("position", "id")):
+        if project_skill.position != position:
+            ProjectSkill.objects.filter(pk=project_skill.pk).update(position=position)
 
 
 def _normalize_skill_positions(profile: CandidateProfile) -> None:
@@ -446,6 +470,85 @@ def project_reorder(request: HttpRequest, project_id: int) -> HttpResponse:
             projects[index], projects[swap_index] = projects[swap_index], projects[index]
             for position, item in enumerate(projects):
                 Project.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def project_skill_create(request: HttpRequest, project_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project = _project_for_account(account, project_id)
+    form = ProjectSkillForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            with transaction.atomic():
+                locked_project = Project.objects.select_for_update().get(pk=project.pk)
+                concept, _ = resolve_skill_label(form.cleaned_data["label"])
+                if ProjectSkill.objects.filter(
+                    project=locked_project,
+                    concept=concept,
+                ).exists():
+                    form.add_error("label", "This skill is already used in this project.")
+                else:
+                    ProjectSkill.objects.create(
+                        project=locked_project,
+                        concept=concept,
+                        label=form.cleaned_data["label"],
+                        position=locked_project.project_skills.count(),
+                    )
+        except IntegrityError:
+            form.add_error("label", "This skill is already used in this project.")
+        if not form.errors:
+            return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        project.profile,
+        project_skill_form=form,
+        project_skill_project=project,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_project_skill_form.html", context)
+    context["form"] = CandidateProfileForm(instance=project.profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def project_skill_delete(request: HttpRequest, project_skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project_skill = _project_skill_for_account(account, project_skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_skill.project_id)
+        project_skill.delete()
+        _normalize_project_skill_positions(project)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def project_skill_reorder(request: HttpRequest, project_skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    project_skill = _project_skill_for_account(account, project_skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_skill.project_id)
+        project_skills = list(project.project_skills.order_by("position", "id"))
+        index = project_skills.index(project_skill)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(project_skills):
+            project_skills[index], project_skills[swap_index] = (
+                project_skills[swap_index],
+                project_skills[index],
+            )
+            for position, item in enumerate(project_skills):
+                ProjectSkill.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
 
 

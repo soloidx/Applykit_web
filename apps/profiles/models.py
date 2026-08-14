@@ -8,6 +8,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 
+from apps.skills.models import SkillConcept, normalize_skill_label
+
 IANA_TIMEZONES = frozenset(available_timezones())
 
 
@@ -172,6 +174,52 @@ class Project(models.Model):
                 Project.objects.filter(profile=self.profile).order_by("-position", "-id").first()
             )
             self.position = last_project.position + 1 if last_project else 0
+        super().save(*args, **kwargs)
+
+
+class ProjectSkill(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="project_skills",
+    )
+    concept = models.ForeignKey(
+        SkillConcept,
+        on_delete=models.PROTECT,
+        related_name="project_skills",
+    )
+    label = models.CharField(max_length=200)
+    normalized_label = models.CharField(max_length=200, editable=False)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "concept"],
+                name="project_skill_unique_concept",
+            ),
+            models.CheckConstraint(
+                condition=~Q(normalized_label=""),
+                name="project_skill_label_not_blank",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.label
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.label = self.label.strip()
+        self.normalized_label = normalize_skill_label(self.label)
+        if not self.normalized_label:
+            raise ValidationError("Enter a hard-skill label.")
+        if self._state.adding and self.position == 0:
+            last_project_skill = (
+                ProjectSkill.objects.filter(project=self.project)
+                .order_by("-position", "-id")
+                .first()
+            )
+            self.position = last_project_skill.position + 1 if last_project_skill else 0
         super().save(*args, **kwargs)
 
 

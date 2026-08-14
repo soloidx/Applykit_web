@@ -148,7 +148,7 @@
         <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Selected work</p>
         <h2 id="projects-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Projects</h2>
       </div>
-      <p class="max-w-sm text-sm leading-6 text-ink/60">Capture the independent work and technical context you want to keep close.</p>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Capture the independent work, then add structured skills as the primary technical record. Older technology text stays visible below.</p>
     </div>
     <div class="mt-8">
       {% include "profiles/_project_form.html" %}
@@ -180,7 +180,39 @@
           </div>
         </div>
         {% if project.description %}<p class="mt-5 max-w-3xl whitespace-pre-line text-sm leading-7 text-ink/70">{{ project.description }}</p>{% endif %}
-        {% if project.technologies %}<p class="mt-4 text-sm text-ink/60"><span class="font-semibold text-ink">Technologies:</span> {{ project.technologies }}</p>{% endif %}
+        {% if project.technologies %}<p class="mt-4 text-sm text-ink/60"><span class="font-semibold text-ink">Legacy technologies:</span> {{ project.technologies }}</p>{% endif %}
+        <div class="mt-6 border-t border-ink/10 pt-5">
+          <div class="flex items-center justify-between gap-4">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/60">Structured skills</h4>
+            <span class="text-xs text-ink/50">Ordered evidence for this project</span>
+          </div>
+          <div class="mt-4">{% include "profiles/_project_skill_form.html" with project=project project_skill_form=project_skill_form %}</div>
+          {% if project.project_skills.all %}
+          <ul class="mt-4 flex flex-wrap gap-3">
+            {% for project_skill in project.project_skills.all %}
+            <li class="flex items-center gap-2 rounded-full border border-ink/10 bg-cream px-4 py-2 text-sm font-semibold">
+              <span>{{ project_skill.label }}</span>
+              <form method="post" action="{% url 'project_skill_delete' project_skill.pk %}">
+                {% csrf_token %}
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ project_skill.label }} from {{ project.name }}">Remove</button>
+              </form>
+              <form method="post" action="{% url 'project_skill_reorder' project_skill.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="direction" value="up">
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.label }} up">&uarr;</button>
+              </form>
+              <form method="post" action="{% url 'project_skill_reorder' project_skill.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="direction" value="down">
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.label }} down">&darr;</button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="mt-4 text-sm text-ink/55">No structured skills yet.</p>
+          {% endif %}
+        </div>
       </article>
       {% empty %}
       <p class="rounded-2xl border border-dashed border-ink/20 px-5 py-6 text-sm text-ink/60">Add a project when you are ready.</p>
