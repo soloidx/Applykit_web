@@ -1263,9 +1263,7 @@ def test_skill_association_schema_has_label_constraints_without_normalized_colum
     with pytest.raises(IntegrityError):
         model, owner, _ = models_and_constraints[0]
         with transaction.atomic():
-            model.objects.bulk_create(
-                [model(profile=owner, concept=concept, label="", position=0)]
-            )
+            model.objects.bulk_create([model(profile=owner, concept=concept, label="", position=0)])
     with pytest.raises(IntegrityError):
         model, owner, _ = models_and_constraints[1]
         with transaction.atomic():
@@ -1275,9 +1273,7 @@ def test_skill_association_schema_has_label_constraints_without_normalized_colum
     with pytest.raises(IntegrityError):
         model, owner, _ = models_and_constraints[2]
         with transaction.atomic():
-            model.objects.bulk_create(
-                [model(project=owner, concept=concept, label="", position=0)]
-            )
+            model.objects.bulk_create([model(project=owner, concept=concept, label="", position=0)])
 
 
 @pytest.mark.django_db
