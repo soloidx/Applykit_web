@@ -45,6 +45,20 @@ The timezone is stored as an IANA timezone identifier. Candidates choose it from
 
 Do not shorten this term to CV when referring to the source data. A future Resume is a document derived from this profile.
 
+### Skill Concept
+
+A globally shared canonical identity for one public hard skill, such as `Node.js`. A Skill Concept has a preferred canonical name and deterministic aliases such as `nodejs` and `NodeJS`. Its stable identifier, not its canonical name, is the matching identity because names and aliases may be corrected or merged later.
+
+The catalog includes technologies, tools, methods, certifications, and domain skills, but not soft traits. Version labels collapse into the broader capability rather than creating version-specific concepts. Any unknown candidate-entered hard-skill label creates a globally shared Skill Concept. This deliberately treats submitted skill names as public catalog data.
+
+Exact normalized aliases resolve automatically. The MVP does not infer aliases from string similarity or an AI provider. Future automated semantic merges must retain aliases and stable references, and uncertain merges require review.
+
+### Candidate Skill Association
+
+A private assertion that a candidate used or possesses a Skill Concept. Profile Skills, Experience Skills, and Project Skills are independent lists: adding a skill in one location does not add it to another. Each association preserves the candidate's trimmed entered label for display, including its spelling, case, and punctuation, and may reference a Skill Concept only once within its location.
+
+Candidate Skill Associations have display order but no proficiency, duration, or recency metadata in the MVP. Matching treats a concept as one binary capability even when it appears in several locations; repeated associations provide explanatory evidence but do not increase match strength.
+
 ### Campaign
 
 A candidate-owned container for a focused job-search effort. Each Campaign defines positive integer weekly and monthly submission targets and is either `Active` or `Archived`. When activated, it snapshots the Candidate Profile's timezone.
@@ -68,6 +82,16 @@ Authenticated users may create Companies, but canonical identity fields are immu
 A candidate's attempt to obtain one role at one Company within one Campaign. A draft requires a Company, role title, and job description. Posting URL, location, compensation, source, and private notes are optional.
 
 Duplicate applications are allowed because a candidate may apply to the same Company or role more than once.
+
+### Application Skill Requirement
+
+A private, candidate-editable hard-skill requirement attached to one Job Application and mapped to one shared Skill Concept. It preserves the trimmed extracted or entered label for display, including its spelling, case, and punctuation, and classifies the requirement as `Required` or `Preferred`.
+
+The candidate may add, edit, or remove requirements. Re-extracting requirements after a job-description change only adds newly found concepts; it does not remove requirements that are no longer present in the text.
+
+### Skill Coverage
+
+The live comparison between a Job Application's Skill Concepts and the unique Skill Concepts referenced by all of the candidate's Profile, Experience, and Project skill associations. Coverage is shown as matched and missing lists separated into Required and Preferred requirements. It is derived on every read and is not persisted as a score or snapshot.
 
 ### Application Stage
 
@@ -106,6 +130,7 @@ The first release displays upcoming events on the dashboard and does not send re
 - Candidate Profile, Campaign, Job Application, Stage Transition, and Recruitment Event data is private to one Account.
 - Every query and mutation of private data must be scoped to the authenticated Account.
 - A shared Company must contain only public canonical identity data.
+- Skill Concepts and their aliases are globally shared public catalog data. Candidate Skill Associations and Application Skill Requirements remain private to one Account.
 - Deleting an Account deletes its private domain data but does not delete shared Companies.
 - Users may hard-delete Job Applications. Because Campaign Progress is derived from existing applications, deleting a submitted application changes any current or historical goal calculation that included it. The UI must warn about that consequence.
 
