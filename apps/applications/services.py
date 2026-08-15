@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
 
@@ -16,7 +17,77 @@ from apps.applications.models import (
     RecruitmentEvent,
     StageTransition,
 )
+from apps.profiles.models import CandidateProfile
 from apps.skills.services import resolve_skill_label
+
+
+@dataclass(frozen=True)
+class SkillEvidence:
+    location: str
+    label: str
+
+
+@dataclass(frozen=True)
+class SkillCoverageItem:
+    requirement: ApplicationSkillRequirement
+    evidence: tuple[SkillEvidence, ...]
+
+
+@dataclass(frozen=True)
+class SkillCoverage:
+    matched_required: tuple[SkillCoverageItem, ...]
+    missing_required: tuple[SkillCoverageItem, ...]
+    matched_preferred: tuple[SkillCoverageItem, ...]
+    missing_preferred: tuple[SkillCoverageItem, ...]
+
+
+def calculate_skill_coverage(
+    *,
+    account: Account,
+    application: JobApplication,
+    candidate_profile: CandidateProfile,
+) -> SkillCoverage:
+    application = JobApplication.objects.get(pk=application.pk, account=account)
+    if candidate_profile.account_id != account.pk:
+        raise CandidateProfile.DoesNotExist
+    evidence_by_concept: dict[int, list[SkillEvidence]] = {}
+
+    def add_evidence(concept_id: int, location: str, label: str) -> None:
+        evidence_by_concept.setdefault(concept_id, []).append(
+            SkillEvidence(location=location, label=label)
+        )
+
+    for profile_skill in candidate_profile.profile_skills.all():
+        add_evidence(profile_skill.concept_id, "Profile skills", profile_skill.label)
+    for experience in candidate_profile.experiences.prefetch_related("experience_skills"):
+        location = f"Experience: {experience.role} at {experience.organization}"
+        for experience_skill in experience.experience_skills.all():
+            add_evidence(experience_skill.concept_id, location, experience_skill.label)
+    for project in candidate_profile.projects.prefetch_related("project_skills"):
+        location = f"Project: {project.name}"
+        for project_skill in project.project_skills.all():
+            add_evidence(project_skill.concept_id, location, project_skill.label)
+
+    coverage: dict[str, list[SkillCoverageItem]] = {
+        "matched_required": [],
+        "missing_required": [],
+        "matched_preferred": [],
+        "missing_preferred": [],
+    }
+    for requirement in application.skill_requirements.select_related("concept").all():
+        evidence = tuple(evidence_by_concept.get(requirement.concept_id, []))
+        status = "matched" if evidence else "missing"
+        classification = "required" if requirement.classification == "required" else "preferred"
+        coverage[f"{status}_{classification}"].append(
+            SkillCoverageItem(requirement=requirement, evidence=evidence)
+        )
+
+    return SkillCoverage(
+        matched_required=tuple(coverage["matched_required"]),
+        missing_required=tuple(coverage["missing_required"]),
+        matched_preferred=tuple(coverage["matched_preferred"]),
+        missing_preferred=tuple(coverage["missing_preferred"]),
+    )
 
 
 def normalized_registrable_domain(website: str) -> str:

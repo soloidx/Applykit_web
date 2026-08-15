@@ -18,7 +18,14 @@ from apps.applications.models import (
 )
 from apps.applications.services import create_or_reuse_company, transition_application
 from apps.campaigns.models import Campaign
-from apps.profiles.models import CandidateProfile
+from apps.profiles.models import (
+    CandidateProfile,
+    Experience,
+    ExperienceSkill,
+    ProfileSkill,
+    Project,
+    ProjectSkill,
+)
 from apps.skills.models import SkillAlias, SkillConcept
 
 pytestmark = pytest.mark.integration
@@ -1169,3 +1176,178 @@ def test_skill_requirements_are_private_and_cascade_without_deleting_shared_cata
     assert not ApplicationSkillRequirement.objects.filter(pk=requirement.pk).exists()
     assert SkillConcept.objects.filter(pk=concept.pk).exists()
     assert SkillAlias.objects.filter(concept=concept).exists()
+
+
+@pytest.mark.django_db
+def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence_sources() -> None:
+    account = verified_candidate("coverage-candidate@example.com")
+    profile = account.candidate_profile
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    node = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=node, display_name="NodeJS")
+    python = SkillConcept.objects.create(canonical_name="Python")
+    django = SkillConcept.objects.create(canonical_name="Django")
+    rust = SkillConcept.objects.create(canonical_name="Rust")
+    elixir = SkillConcept.objects.create(canonical_name="Elixir")
+    go = SkillConcept.objects.create(canonical_name="Go")
+    vue = SkillConcept.objects.create(canonical_name="Vue")
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Staff engineer",
+        organization="Example Labs",
+        location="Remote",
+        start_date="2020-01-01",
+    )
+    project = Project.objects.create(
+        profile=profile,
+        name="Deployment platform",
+    )
+    ProfileSkill.objects.create(profile=profile, concept=node, label="NodeJS")
+    ProfileSkill.objects.create(profile=profile, concept=python, label="Python")
+    ExperienceSkill.objects.create(experience=experience, concept=node, label="Node.js")
+    ExperienceSkill.objects.create(experience=experience, concept=django, label="Django")
+    ExperienceSkill.objects.create(experience=experience, concept=go, label="Golang")
+    ProjectSkill.objects.create(project=project, concept=django, label="Django REST")
+    ProjectSkill.objects.create(project=project, concept=vue, label="Vue.js")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=node,
+        label="Node.js",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=python,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=rust,
+        label="Rust",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=go,
+        label="Go",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=django,
+        label="Django",
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=elixir,
+        label="Elixir",
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=vue,
+        label="Vue",
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert response.status_code == 200
+    assert b"Skill coverage" in response.content
+    assert response.content.count(b'data-skill-coverage-item="matched-required"') == 3
+    assert response.content.count(b'data-skill-coverage-item="missing-required"') == 1
+    assert response.content.count(b'data-skill-coverage-item="matched-preferred"') == 2
+    assert response.content.count(b'data-skill-coverage-item="missing-preferred"') == 1
+    assert b"Node.js" in response.content
+    assert b"Rust" in response.content
+    assert b"Django" in response.content
+    assert b"Elixir" in response.content
+    assert b"Profile skills: NodeJS" in response.content
+    assert b"Profile skills: Python" in response.content
+    assert b"Experience: Staff engineer at Example Labs: Node.js" in response.content
+    assert b"Experience: Staff engineer at Example Labs: Django" in response.content
+    assert b"Experience: Staff engineer at Example Labs: Golang" in response.content
+    assert b"Project: Deployment platform: Django REST" in response.content
+    assert b"Project: Deployment platform: Vue.js" in response.content
+    assert b"coverage score" not in response.content.lower()
+
+
+@pytest.mark.django_db
+def test_application_detail_recalculates_live_coverage_after_changes() -> None:
+    account = verified_candidate("live-coverage-candidate@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    python = SkillConcept.objects.create(canonical_name="Python")
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=python,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    missing = client.get(reverse("application_detail", args=[application.pk]))
+    created_skill = client.post(reverse("skill_create"), {"name": "Python"})
+    matched = client.get(reverse("application_detail", args=[application.pk]))
+    remapped_requirement = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),
+        {"label": "Django"},
+    )
+    changed = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert created_skill.status_code == 302
+    assert remapped_requirement.status_code == 302
+    assert b"Python" in missing.content
+    assert b"Profile skills: Python" not in missing.content
+    assert b"Profile skills: Python" in matched.content
+    assert b"Django" in changed.content
+    assert b"Profile skills: Python" not in changed.content
+    assert changed.content.count(b'data-skill-coverage-item="missing-required"') == 1
+
+
+@pytest.mark.django_db
+def test_skill_coverage_is_isolated_from_other_accounts() -> None:
+    owner = verified_candidate("coverage-owner@example.com")
+    intruder = verified_candidate("coverage-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private platform engineer",
+        job_description="Private job description.",
+    )
+    ProfileSkill.objects.create(profile=owner.candidate_profile, concept=concept, label="Python")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    response = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert response.status_code == 404
+    assert b"Private platform engineer" not in response.content
+    assert b"Python" not in response.content

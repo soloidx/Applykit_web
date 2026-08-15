@@ -29,6 +29,7 @@ from apps.applications.models import (
     RecruitmentEvent,
 )
 from apps.applications.services import (
+    calculate_skill_coverage,
     create_application_skill_requirement,
     create_or_reuse_company,
     create_recruitment_event,
@@ -411,7 +412,8 @@ def _application_detail_context(
     requirement_remap_form: ApplicationSkillRequirementRemapForm | None = None,
     requirement_remap_id: int | None = None,
 ) -> dict[str, object]:
-    timezone_name = CandidateProfile.objects.get(account=account).timezone
+    candidate_profile = CandidateProfile.objects.get(account=account)
+    timezone_name = candidate_profile.timezone
     candidate_timezone = ZoneInfo(timezone_name)
     events = list(application.recruitment_events.all())
     for event in events:
@@ -427,6 +429,11 @@ def _application_detail_context(
                 instance=event,
             )
     requirements = list(application.skill_requirements.select_related("concept").all())
+    skill_coverage = calculate_skill_coverage(
+        account=account,
+        application=application,
+        candidate_profile=candidate_profile,
+    )
     for requirement in requirements:
         if requirement_edit_form is not None and requirement.pk == requirement_edit_id:
             requirement.edit_form = requirement_edit_form
@@ -459,6 +466,7 @@ def _application_detail_context(
             for requirement in requirements
             if requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
         ],
+        "skill_coverage": skill_coverage,
         "requirement_form": requirement_form or ApplicationSkillRequirementCreateForm(),
         "candidate_timezone": timezone_name,
     }

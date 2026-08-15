@@ -1,0 +1,19 @@
+{% if items %}
+<ul class="mt-4 grid gap-4">
+  {% for item in items %}
+  <li class="rounded-2xl bg-sand p-5" data-skill-coverage-item="{{ status }}-{{ classification }}">
+    <p class="font-semibold">{{ item.requirement.label }}</p>
+    <p class="mt-1 text-sm text-ink/65">Mapped concept: {{ item.requirement.concept.canonical_name }}</p>
+    {% if item.evidence %}
+    <ul class="mt-3 grid gap-2 text-sm text-ink/70">
+      {% for evidence in item.evidence %}
+      <li>{{ evidence.location }}: {{ evidence.label }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="mt-4 text-ink/65">No {{ status }} {{ classification }} skill requirements.</p>
+{% endif %}
