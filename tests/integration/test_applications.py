@@ -123,7 +123,7 @@ def test_authenticated_navigation_marks_dashboard_and_profile_sections() -> None
     assert b'href="/dashboard/"' in dashboard.content
     assert b'href="/profile/"' in profile.content
     assert b'href="/applications/"' in dashboard.content
-    assert b'Sign out' in dashboard.content
+    assert b"Sign out" in dashboard.content
 
 
 @pytest.mark.django_db

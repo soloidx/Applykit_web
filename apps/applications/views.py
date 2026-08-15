@@ -55,10 +55,14 @@ def application_board(request: HttpRequest) -> HttpResponse:
         value: [] for value, _ in JobApplication.Stage.choices
     }
     if active_campaign is not None:
-        applications = JobApplication.objects.filter(
-            account=account,
-            campaign=active_campaign,
-        ).select_related("company").order_by("-updated_at", "-pk")
+        applications = (
+            JobApplication.objects.filter(
+                account=account,
+                campaign=active_campaign,
+            )
+            .select_related("company")
+            .order_by("-updated_at", "-pk")
+        )
         for application in applications:
             applications_by_stage[application.stage].append(application)
     stage_columns = [
