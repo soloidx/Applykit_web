@@ -6,6 +6,10 @@ from apps.applications.views import (
     application_delete,
     application_detail,
     application_edit,
+    application_skill_requirement_create,
+    application_skill_requirement_delete,
+    application_skill_requirement_edit,
+    application_skill_requirement_remap,
     recruitment_event_create,
     recruitment_event_edit,
 )
@@ -15,6 +19,26 @@ urlpatterns = [
     path("applications/new/", application_create, name="application_create"),
     path("applications/<int:application_id>/", application_detail, name="application_detail"),
     path("applications/<int:application_id>/edit/", application_edit, name="application_edit"),
+    path(
+        "applications/<int:application_id>/skills/new/",
+        application_skill_requirement_create,
+        name="application_skill_requirement_create",
+    ),
+    path(
+        "applications/<int:application_id>/skills/<int:requirement_id>/edit/",
+        application_skill_requirement_edit,
+        name="application_skill_requirement_edit",
+    ),
+    path(
+        "applications/<int:application_id>/skills/<int:requirement_id>/remap/",
+        application_skill_requirement_remap,
+        name="application_skill_requirement_remap",
+    ),
+    path(
+        "applications/<int:application_id>/skills/<int:requirement_id>/delete/",
+        application_skill_requirement_delete,
+        name="application_skill_requirement_delete",
+    ),
     path(
         "applications/<int:application_id>/delete/",
         application_delete,

@@ -1,0 +1,43 @@
+{% if requirements %}
+<ol class="mt-4 grid gap-4">
+  {% for requirement in requirements %}
+  <li class="rounded-2xl bg-sand p-5">
+    <p class="font-semibold">{{ requirement.label }}</p>
+    <p class="mt-1 text-sm text-ink/65">Mapped concept: {{ requirement.concept.canonical_name }}</p>
+    <form class="mt-4 grid gap-3" method="post" action="{% url 'application_skill_requirement_edit' application.pk requirement.pk %}" hx-post="{% url 'application_skill_requirement_edit' application.pk requirement.pk %}" hx-target="#application-detail" hx-select="#application-detail" hx-swap="outerHTML">
+      {% csrf_token %}
+      {{ requirement.edit_form.non_field_errors }}
+      <div>
+        <label class="text-sm font-semibold" for="{{ requirement.edit_form.label.id_for_label }}">Wording</label>
+        <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ requirement.edit_form.label.id_for_label }}" name="{{ requirement.edit_form.label.html_name }}" type="text" value="{{ requirement.edit_form.label.value|default_if_none:'' }}">
+        {{ requirement.edit_form.label.errors }}
+      </div>
+      <div>
+        <label class="text-sm font-semibold" for="{{ requirement.edit_form.classification.id_for_label }}">Requirement type</label>
+        <select class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ requirement.edit_form.classification.id_for_label }}" name="{{ requirement.edit_form.classification.html_name }}">
+          {% for value, label in requirement.edit_form.fields.classification.choices %}
+          <option value="{{ value }}"{% if requirement.edit_form.classification.value == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        {{ requirement.edit_form.classification.errors }}
+      </div>
+      <button class="justify-self-start rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Save wording</button>
+    </form>
+    <form class="mt-4 grid gap-3" method="post" action="{% url 'application_skill_requirement_remap' application.pk requirement.pk %}" hx-post="{% url 'application_skill_requirement_remap' application.pk requirement.pk %}" hx-target="#application-detail" hx-select="#application-detail" hx-swap="outerHTML">
+      {% csrf_token %}
+      {{ requirement.remap_form.non_field_errors }}
+      <label class="text-sm font-semibold" for="{{ requirement.remap_form.label.id_for_label }}">Remap to another concept</label>
+      <input class="rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ requirement.remap_form.label.id_for_label }}" name="{{ requirement.remap_form.label.html_name }}" type="text" value="{{ requirement.remap_form.label.value|default_if_none:'' }}">
+      {{ requirement.remap_form.label.errors }}
+      <button class="justify-self-start rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Remap concept</button>
+    </form>
+    <form class="mt-3" method="post" action="{% url 'application_skill_requirement_delete' application.pk requirement.pk %}" hx-post="{% url 'application_skill_requirement_delete' application.pk requirement.pk %}" hx-target="#application-detail" hx-select="#application-detail" hx-swap="outerHTML">
+      {% csrf_token %}
+      <button class="text-sm font-semibold text-coral transition hover:text-ink" type="submit">Remove requirement</button>
+    </form>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="mt-4 text-ink/65">No {{ classification }} skill requirements yet.</p>
+{% endif %}

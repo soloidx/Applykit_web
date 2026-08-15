@@ -9,12 +9,14 @@ from publicsuffix2 import get_sld
 
 from apps.accounts.models import Account
 from apps.applications.models import (
+    ApplicationSkillRequirement,
     Company,
     CompanyDomainAlias,
     JobApplication,
     RecruitmentEvent,
     StageTransition,
 )
+from apps.skills.services import resolve_skill_label
 
 
 def normalized_registrable_domain(website: str) -> str:
@@ -116,6 +118,116 @@ def transition_application(*, account: Account, application_id: int, stage: str)
     application.stage = target_stage
     application.save(update_fields=["stage", "first_submitted_at", "updated_at"])
     return application
+
+
+def _requirement_classification(value: str) -> str:
+    try:
+        return ApplicationSkillRequirement.Classification(value)
+    except ValueError as error:
+        raise ValidationError(
+            {"classification": "Select a valid requirement classification."}
+        ) from error
+
+
+def _requirement_label(value: str) -> str:
+    label = value.strip()
+    if not label:
+        raise ValidationError({"label": "Enter a hard-skill label."})
+    return label
+
+
+@transaction.atomic
+def create_application_skill_requirement(
+    *,
+    account: Account,
+    application_id: int,
+    label: str,
+    classification: str,
+) -> ApplicationSkillRequirement:
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
+    )
+    display_label = _requirement_label(label)
+    selected_classification = _requirement_classification(classification)
+    concept, _ = resolve_skill_label(display_label)
+    if ApplicationSkillRequirement.objects.filter(
+        application=application, concept=concept
+    ).exists():
+        raise ValidationError("This application already has this skill requirement.")
+    requirement = ApplicationSkillRequirement(
+        application=application,
+        concept=concept,
+        label=display_label,
+        classification=selected_classification,
+    )
+    requirement.full_clean()
+    requirement.save()
+    return requirement
+
+
+@transaction.atomic
+def update_application_skill_requirement(
+    *,
+    account: Account,
+    application_id: int,
+    requirement_id: int,
+    label: str,
+    classification: str,
+) -> ApplicationSkillRequirement:
+    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
+        pk=requirement_id,
+        application_id=application_id,
+        application__account=account,
+    )
+    requirement.label = _requirement_label(label)
+    requirement.classification = _requirement_classification(classification)
+    requirement.full_clean()
+    requirement.save(update_fields=["label", "normalized_label", "classification"])
+    return requirement
+
+
+@transaction.atomic
+def remap_application_skill_requirement(
+    *,
+    account: Account,
+    application_id: int,
+    requirement_id: int,
+    label: str,
+) -> ApplicationSkillRequirement:
+    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
+        pk=requirement_id,
+        application_id=application_id,
+        application__account=account,
+    )
+    display_label = _requirement_label(label)
+    concept, _ = resolve_skill_label(display_label)
+    if (
+        ApplicationSkillRequirement.objects.filter(application_id=application_id, concept=concept)
+        .exclude(pk=requirement.pk)
+        .exists()
+    ):
+        raise ValidationError("This application already has this skill requirement.")
+    requirement.concept = concept
+    requirement.label = display_label
+    requirement.full_clean()
+    requirement.save(update_fields=["concept", "label", "normalized_label"])
+    return requirement
+
+
+@transaction.atomic
+def delete_application_skill_requirement(
+    *,
+    account: Account,
+    application_id: int,
+    requirement_id: int,
+) -> None:
+    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
+        pk=requirement_id,
+        application_id=application_id,
+        application__account=account,
+    )
+    requirement.delete()
 
 
 @transaction.atomic

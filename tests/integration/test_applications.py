@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.accounts.models import Account
 from apps.applications.models import (
+    ApplicationSkillRequirement,
     Company,
     CompanyDomainAlias,
     JobApplication,
@@ -18,6 +19,7 @@ from apps.applications.models import (
 from apps.applications.services import create_or_reuse_company, transition_application
 from apps.campaigns.models import Campaign
 from apps.profiles.models import CandidateProfile
+from apps.skills.models import SkillAlias, SkillConcept
 
 pytestmark = pytest.mark.integration
 
@@ -941,3 +943,229 @@ def test_application_deletion_is_scoped_to_the_authenticated_candidate() -> None
     assert confirmation.status_code == 404
     assert attempted_delete.status_code == 404
     assert JobApplication.objects.filter(pk=application.pk).exists()
+
+
+@pytest.mark.django_db
+def test_candidate_can_add_skill_requirements_with_aliases_unknown_labels_and_htmx() -> None:
+    account = verified_candidate("requirement-add@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="NodeJS")
+    client = Client()
+    client.force_login(account)
+
+    canonical = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": "NodeJS", "classification": ApplicationSkillRequirement.Classification.REQUIRED},
+    )
+    unknown = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {
+            "label": "  Kubernetes  ",
+            "classification": ApplicationSkillRequirement.Classification.PREFERRED,
+        },
+        headers={"HX-Request": "true"},
+    )
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+
+    assert canonical.status_code == 302
+    assert unknown.status_code == 200
+    assert unknown.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 2
+    node_requirement = ApplicationSkillRequirement.objects.get(concept=concept)
+    assert node_requirement.label == "NodeJS"
+    assert node_requirement.classification == ApplicationSkillRequirement.Classification.REQUIRED
+    kubernetes_requirement = ApplicationSkillRequirement.objects.get(label="Kubernetes")
+    assert (
+        kubernetes_requirement.classification
+        == ApplicationSkillRequirement.Classification.PREFERRED
+    )
+    assert b"Required skill requirements" in detail.content
+    assert b"Preferred skill requirements" in detail.content
+    assert b"Node.js" in detail.content
+    assert b"Kubernetes" in detail.content
+    removed = client.post(
+        reverse(
+            "application_skill_requirement_delete",
+            args=[application.pk, kubernetes_requirement.pk],
+        ),
+        {},
+        headers={"HX-Request": "true"},
+    )
+    assert removed.status_code == 200
+    assert removed.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
+    assert not ApplicationSkillRequirement.objects.filter(pk=kubernetes_requirement.pk).exists()
+
+
+@pytest.mark.django_db
+def test_candidate_can_edit_requirement_wording_without_remapping_and_can_deliberately_remap() -> (
+    None
+):
+    account = verified_candidate("requirement-edit@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    node, _ = SkillConcept.objects.get_or_create(
+        canonical_key="node", defaults={"canonical_name": "Node"}
+    )
+    django = SkillConcept.objects.create(canonical_name="Django")
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=node,
+        label="Node.js",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    edited = client.post(
+        reverse("application_skill_requirement_edit", args=[application.pk, requirement.pk]),
+        {
+            "label": "Node.js in production",
+            "classification": ApplicationSkillRequirement.Classification.PREFERRED,
+        },
+    )
+    requirement.refresh_from_db()
+    assert requirement.label == "Node.js in production"
+    assert requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
+    assert requirement.concept_id == node.pk
+    remapped = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),
+        {"label": "Django"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert edited.status_code == 302
+    assert remapped.status_code == 200
+    assert remapped.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
+    requirement.refresh_from_db()
+    assert requirement.label == "Django"
+    assert requirement.concept_id == django.pk
+
+
+@pytest.mark.django_db
+def test_requirement_duplicate_and_invalid_input_returns_focused_feedback_without_records() -> None:
+    account = verified_candidate("requirement-validation@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    concept, _ = SkillConcept.objects.get_or_create(
+        canonical_key="python",
+        defaults={"canonical_name": "Python"},
+    )
+    SkillAlias.objects.get_or_create(
+        concept=concept, normalized_value="py", defaults={"display_name": "py"}
+    )
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    duplicate = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": "PY", "classification": ApplicationSkillRequirement.Classification.PREFERRED},
+    )
+    blank = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": " ", "classification": ApplicationSkillRequirement.Classification.REQUIRED},
+    )
+    invalid_classification = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": "Rust", "classification": "mandatory"},
+    )
+
+    assert duplicate.status_code == 200
+    assert b"already has this skill requirement" in duplicate.content
+    assert blank.status_code == 200
+    assert b"Enter a hard-skill label." in blank.content
+    assert invalid_classification.status_code == 200
+    assert b"Select a valid choice" in invalid_classification.content
+    assert ApplicationSkillRequirement.objects.count() == 1
+    assert SkillConcept.objects.filter(canonical_key="rust").count() == 0
+    assert requirement.concept_id == concept.pk
+
+
+@pytest.mark.django_db
+def test_skill_requirements_are_private_and_cascade_without_deleting_shared_catalog() -> None:
+    owner = verified_candidate("requirement-owner@example.com")
+    intruder = verified_candidate("requirement-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    concept, _ = SkillConcept.objects.get_or_create(
+        canonical_key="python",
+        defaults={"canonical_name": "Python"},
+    )
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private role",
+        job_description="Private job description.",
+    )
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+    create = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": "Django", "classification": ApplicationSkillRequirement.Classification.REQUIRED},
+    )
+    edit = client.post(
+        reverse("application_skill_requirement_edit", args=[application.pk, requirement.pk]),
+        {
+            "label": "Changed",
+            "classification": ApplicationSkillRequirement.Classification.PREFERRED,
+        },
+    )
+    remove = client.post(
+        reverse("application_skill_requirement_delete", args=[application.pk, requirement.pk]),
+        {},
+    )
+    remap = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),
+        {"label": "Django"},
+    )
+
+    assert detail.status_code == 404
+    assert create.status_code == 404
+    assert edit.status_code == 404
+    assert remove.status_code == 404
+    assert remap.status_code == 404
+    assert ApplicationSkillRequirement.objects.filter(pk=requirement.pk).exists()
+
+    owner_client = Client()
+    owner_client.force_login(owner)
+    deleted = owner_client.post(
+        reverse("application_delete", args=[application.pk]), {"confirm": "1"}
+    )
+
+    assert deleted.status_code == 302
+    assert not ApplicationSkillRequirement.objects.filter(pk=requirement.pk).exists()
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
+    assert SkillAlias.objects.filter(concept=concept).exists()

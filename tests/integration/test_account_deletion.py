@@ -9,6 +9,7 @@ from django.urls import reverse
 from apps.accounts.models import Account
 from apps.accounts.services import delete_account
 from apps.applications.models import (
+    ApplicationSkillRequirement,
     Company,
     CompanyDomainAlias,
     JobApplication,
@@ -92,6 +93,12 @@ def create_private_data(account: Account, company: Company) -> JobApplication:
         event_type=RecruitmentEvent.EventType.INTERVIEW,
         scheduled_at=datetime(2030, 5, 1, 15, 0, tzinfo=UTC),
     )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
     return application
 
 
@@ -157,6 +164,9 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     assert not Language.objects.filter(profile_id=profile_id).exists()
     assert not Campaign.objects.filter(account_id=account.pk).exists()
     assert not JobApplication.objects.filter(account_id=account.pk).exists()
+    assert not ApplicationSkillRequirement.objects.filter(
+        application__account_id=account.pk
+    ).exists()
     assert not StageTransition.objects.filter(application_id=deleted_application.pk).exists()
     assert not RecruitmentEvent.objects.filter(application_id=deleted_application.pk).exists()
     assert Company.objects.filter(pk=company.pk, name="Example Careers").exists()
@@ -199,6 +209,7 @@ def test_account_deletion_rolls_back_when_account_removal_fails(
     assert Language.objects.filter(profile_id=profile_id).exists()
     assert Campaign.objects.filter(account=account).exists()
     assert JobApplication.objects.filter(pk=application.pk).exists()
+    assert ApplicationSkillRequirement.objects.filter(application=application).exists()
     assert StageTransition.objects.filter(application_id=application.pk).exists()
     assert RecruitmentEvent.objects.filter(application_id=application.pk).exists()
     assert Company.objects.filter(pk=company.pk).exists()

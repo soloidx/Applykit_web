@@ -5,7 +5,12 @@ from zoneinfo import ZoneInfo
 from django import forms
 from django.utils import timezone
 
-from apps.applications.models import Company, JobApplication, RecruitmentEvent
+from apps.applications.models import (
+    ApplicationSkillRequirement,
+    Company,
+    JobApplication,
+    RecruitmentEvent,
+)
 
 
 class JobApplicationCreateForm(forms.ModelForm):
@@ -56,6 +61,34 @@ class JobApplicationEditForm(forms.ModelForm):
 
 class ApplicationStageForm(forms.Form):
     stage = forms.ChoiceField(choices=JobApplication.Stage.choices, label="Stage")
+
+
+class ApplicationSkillRequirementCreateForm(forms.Form):
+    label = forms.CharField(max_length=200, required=False, label="Skill label")
+    classification = forms.ChoiceField(
+        choices=ApplicationSkillRequirement.Classification.choices,
+        label="Requirement type",
+    )
+
+    def clean_label(self) -> str:
+        value = self.cleaned_data["label"].strip()
+        if not value:
+            raise forms.ValidationError("Enter a hard-skill label.")
+        return value
+
+
+class ApplicationSkillRequirementEditForm(ApplicationSkillRequirementCreateForm):
+    pass
+
+
+class ApplicationSkillRequirementRemapForm(forms.Form):
+    label = forms.CharField(max_length=200, required=False, label="New skill label")
+
+    def clean_label(self) -> str:
+        value = self.cleaned_data["label"].strip()
+        if not value:
+            raise forms.ValidationError("Enter a hard-skill label.")
+        return value
 
 
 class RecruitmentEventForm(forms.ModelForm):

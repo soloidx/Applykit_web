@@ -4,8 +4,10 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 from apps.campaigns.models import Campaign
+from apps.skills.models import SkillConcept, normalize_skill_label
 
 
 class Company(models.Model):
@@ -63,6 +65,64 @@ class JobApplication(models.Model):
 
     def __str__(self) -> str:
         return f"{self.role_title} at {self.company}"
+
+
+class ApplicationSkillRequirement(models.Model):
+    class Classification(models.TextChoices):
+        REQUIRED = "required", "Required"
+        PREFERRED = "preferred", "Preferred"
+
+    application = models.ForeignKey(
+        JobApplication,
+        on_delete=models.CASCADE,
+        related_name="skill_requirements",
+    )
+    concept = models.ForeignKey(
+        SkillConcept,
+        on_delete=models.PROTECT,
+        related_name="application_requirements",
+    )
+    label = models.CharField(max_length=200)
+    normalized_label = models.CharField(max_length=200, editable=False)
+    classification = models.CharField(max_length=16, choices=Classification.choices)
+    edit_form: Any
+    remap_form: Any
+
+    class Meta:
+        ordering = ["classification", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["application", "concept"],
+                name="application_skill_requirement_unique_concept",
+            ),
+            models.CheckConstraint(
+                condition=~Q(normalized_label=""),
+                name="application_skill_requirement_label_not_blank",
+            ),
+            models.CheckConstraint(
+                condition=Q(classification__in=["required", "preferred"]),
+                name="application_skill_requirement_valid_classification",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.label
+
+    def clean(self) -> None:
+        super().clean()
+        self.label = self.label.strip()
+        self.normalized_label = normalize_skill_label(self.label)
+        if not self.normalized_label:
+            raise ValidationError({"label": "Enter a hard-skill label."})
+        if self.classification not in self.Classification.values:
+            raise ValidationError({"classification": "Select a valid requirement classification."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.label = self.label.strip()
+        self.normalized_label = normalize_skill_label(self.label)
+        if not self.normalized_label:
+            raise ValidationError("Enter a hard-skill label.")
+        super().save(*args, **kwargs)
 
 
 class StageTransition(models.Model):

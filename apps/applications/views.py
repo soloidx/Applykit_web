@@ -14,17 +14,29 @@ from django.utils import timezone
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
 from apps.applications.forms import (
+    ApplicationSkillRequirementCreateForm,
+    ApplicationSkillRequirementEditForm,
+    ApplicationSkillRequirementRemapForm,
     ApplicationStageForm,
     JobApplicationCreateForm,
     JobApplicationEditForm,
     RecruitmentEventForm,
 )
-from apps.applications.models import Company, JobApplication, RecruitmentEvent
+from apps.applications.models import (
+    ApplicationSkillRequirement,
+    Company,
+    JobApplication,
+    RecruitmentEvent,
+)
 from apps.applications.services import (
+    create_application_skill_requirement,
     create_or_reuse_company,
     create_recruitment_event,
     delete_application,
+    delete_application_skill_requirement,
+    remap_application_skill_requirement,
     transition_application,
+    update_application_skill_requirement,
     update_recruitment_event,
 )
 from apps.campaigns.models import Campaign
@@ -210,6 +222,156 @@ def application_detail(request: HttpRequest, application_id: int) -> HttpRespons
 
 @login_required
 @verified_account_required
+def application_skill_requirement_create(request: HttpRequest, application_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    form = ApplicationSkillRequirementCreateForm(request.POST)
+    if form.is_valid():
+        try:
+            create_application_skill_requirement(
+                account=account,
+                application_id=application.pk,
+                label=str(form.cleaned_data["label"]),
+                classification=str(form.cleaned_data["classification"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
+        else:
+            return _redirect_or_htmx_redirect(
+                request,
+                reverse("application_detail", args=[application.pk]),
+            )
+    return render(
+        request,
+        "applications/detail.html",
+        _application_detail_context(account, application, requirement_form=form),
+    )
+
+
+@login_required
+@verified_account_required
+def application_skill_requirement_edit(
+    request: HttpRequest,
+    application_id: int,
+    requirement_id: int,
+) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    requirement = get_object_or_404(
+        ApplicationSkillRequirement,
+        pk=requirement_id,
+        application=application,
+    )
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    form = ApplicationSkillRequirementEditForm(request.POST)
+    if form.is_valid():
+        try:
+            update_application_skill_requirement(
+                account=account,
+                application_id=application.pk,
+                requirement_id=requirement.pk,
+                label=str(form.cleaned_data["label"]),
+                classification=str(form.cleaned_data["classification"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
+        else:
+            return _redirect_or_htmx_redirect(
+                request,
+                reverse("application_detail", args=[application.pk]),
+            )
+    return render(
+        request,
+        "applications/detail.html",
+        _application_detail_context(
+            account,
+            application,
+            requirement_edit_form=form,
+            requirement_edit_id=requirement.pk,
+        ),
+    )
+
+
+@login_required
+@verified_account_required
+def application_skill_requirement_remap(
+    request: HttpRequest,
+    application_id: int,
+    requirement_id: int,
+) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    requirement = get_object_or_404(
+        ApplicationSkillRequirement,
+        pk=requirement_id,
+        application=application,
+    )
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    form = ApplicationSkillRequirementRemapForm(request.POST)
+    if form.is_valid():
+        try:
+            remap_application_skill_requirement(
+                account=account,
+                application_id=application.pk,
+                requirement_id=requirement.pk,
+                label=str(form.cleaned_data["label"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
+        else:
+            return _redirect_or_htmx_redirect(
+                request,
+                reverse("application_detail", args=[application.pk]),
+            )
+    return render(
+        request,
+        "applications/detail.html",
+        _application_detail_context(
+            account,
+            application,
+            requirement_remap_form=form,
+            requirement_remap_id=requirement.pk,
+        ),
+    )
+
+
+@login_required
+@verified_account_required
+def application_skill_requirement_delete(
+    request: HttpRequest,
+    application_id: int,
+    requirement_id: int,
+) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    get_object_or_404(
+        ApplicationSkillRequirement,
+        pk=requirement_id,
+        application=application,
+    )
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    delete_application_skill_requirement(
+        account=account,
+        application_id=application.pk,
+        requirement_id=requirement_id,
+    )
+    return _redirect_or_htmx_redirect(
+        request,
+        reverse("application_detail", args=[application.pk]),
+    )
+
+
+@login_required
+@verified_account_required
 def application_delete(request: HttpRequest, application_id: int) -> HttpResponse:
     account = cast(Account, request.user)
     application = get_object_or_404(
@@ -243,6 +405,11 @@ def _application_detail_context(
     stage_form: ApplicationStageForm | None = None,
     event_form: RecruitmentEventForm | None = None,
     event_forms: dict[int, RecruitmentEventForm] | None = None,
+    requirement_form: ApplicationSkillRequirementCreateForm | None = None,
+    requirement_edit_form: ApplicationSkillRequirementEditForm | None = None,
+    requirement_edit_id: int | None = None,
+    requirement_remap_form: ApplicationSkillRequirementRemapForm | None = None,
+    requirement_remap_id: int | None = None,
 ) -> dict[str, object]:
     timezone_name = CandidateProfile.objects.get(account=account).timezone
     candidate_timezone = ZoneInfo(timezone_name)
@@ -259,11 +426,40 @@ def _application_detail_context(
                 timezone_name=timezone_name,
                 instance=event,
             )
+    requirements = list(application.skill_requirements.select_related("concept").all())
+    for requirement in requirements:
+        if requirement_edit_form is not None and requirement.pk == requirement_edit_id:
+            requirement.edit_form = requirement_edit_form
+        else:
+            requirement.edit_form = ApplicationSkillRequirementEditForm(
+                initial={
+                    "label": requirement.label,
+                    "classification": requirement.classification,
+                }
+            )
+        if requirement_remap_form is not None and requirement.pk == requirement_remap_id:
+            requirement.remap_form = requirement_remap_form
+        else:
+            requirement.remap_form = ApplicationSkillRequirementRemapForm(
+                initial={"label": requirement.label}
+            )
     return {
         "application": application,
         "stage_form": stage_form or ApplicationStageForm(initial={"stage": application.stage}),
         "event_form": event_form or RecruitmentEventForm(timezone_name=timezone_name),
         "recruitment_events": events,
+        "skill_requirements": requirements,
+        "required_skill_requirements": [
+            requirement
+            for requirement in requirements
+            if requirement.classification == ApplicationSkillRequirement.Classification.REQUIRED
+        ],
+        "preferred_skill_requirements": [
+            requirement
+            for requirement in requirements
+            if requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
+        ],
+        "requirement_form": requirement_form or ApplicationSkillRequirementCreateForm(),
         "candidate_timezone": timezone_name,
     }
 
