@@ -191,19 +191,14 @@ class EducationForm(forms.ModelForm):
 class ProjectForm(forms.ModelForm):
     class Meta:
         model = Project
-        fields = ["name", "description", "technologies", "url"]
+        fields = ["name", "description", "url"]
         labels = {
             "name": "Project name",
             "description": "Description",
-            "technologies": "Legacy technologies",
             "url": "Project URL",
-        }
-        help_texts = {
-            "technologies": "Retained as entered for older projects. Add structured skills below.",
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
-            "technologies": forms.Textarea(attrs={"rows": 3}),
         }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -214,15 +209,6 @@ class ProjectForm(forms.ModelForm):
                 "text-ink outline-none transition placeholder:text-ink/35 "
                 "focus:border-coral focus:ring-2 focus:ring-coral/20"
             )
-        self.fields["technologies"].widget.attrs["readonly"] = True
-
-    def clean_technologies(self) -> str:
-        technologies = self.cleaned_data["technologies"]
-        if self.instance.pk and self.instance.technologies and not technologies.strip():
-            return self.instance.technologies
-        return technologies
-
-
 class LanguageForm(forms.ModelForm):
     name = forms.CharField(strip=False, label="Language")
 

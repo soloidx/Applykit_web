@@ -200,7 +200,6 @@ class Project(models.Model):
     )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    technologies = models.TextField(blank=True)
     url = models.URLField(blank=True)
     position = models.PositiveIntegerField(default=0)
 

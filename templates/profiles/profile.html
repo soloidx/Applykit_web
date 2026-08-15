@@ -180,7 +180,7 @@
         <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Selected work</p>
         <h2 id="projects-heading" class="mt-2 font-display text-4xl font-semibold tracking-tight">Projects</h2>
       </div>
-      <p class="max-w-sm text-sm leading-6 text-ink/60">Capture the independent work, then add structured skills as the primary technical record. Older technology text stays visible below.</p>
+      <p class="max-w-sm text-sm leading-6 text-ink/60">Capture the independent work, then add structured skills to record the technologies that matter.</p>
     </div>
     <div class="mt-8">
       {% include "profiles/_project_form.html" %}
@@ -212,7 +212,6 @@
           </div>
         </div>
         {% if project.description %}<p class="mt-5 max-w-3xl whitespace-pre-line text-sm leading-7 text-ink/70">{{ project.description }}</p>{% endif %}
-        {% if project.technologies %}<p class="mt-4 text-sm text-ink/60"><span class="font-semibold text-ink">Legacy technologies:</span> {{ project.technologies }}</p>{% endif %}
         <div class="mt-6 border-t border-ink/10 pt-5">
           <div class="flex items-center justify-between gap-4">
             <h4 class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/60">Structured skills</h4>

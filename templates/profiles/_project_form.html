@@ -8,7 +8,7 @@
     {% if project_form.non_field_errors %}<div class="rounded-2xl bg-coral/10 px-4 py-3 text-sm text-coral" role="alert">{{ project_form.non_field_errors }}</div>{% endif %}
     <div class="grid gap-5 sm:grid-cols-2">
       {% for field in project_form %}
-      <div class="{% if field.name == 'description' or field.name == 'technologies' %}sm:col-span-2{% endif %}">
+      <div class="{% if field.name == 'description' %}sm:col-span-2{% endif %}">
         <label class="text-sm font-semibold text-ink" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-coral">*</span>{% endif %}</label>
         {{ field }}
         {% if field.help_text %}<p class="mt-2 text-sm leading-6 text-ink/55">{{ field.help_text }}</p>{% endif %}

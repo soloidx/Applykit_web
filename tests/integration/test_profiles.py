@@ -474,7 +474,6 @@ def project_data(**overrides: str) -> dict[str, str]:
     data = {
         "name": "Analytical Engine Visualizer",
         "description": "A visual exploration of mechanical computation.",
-        "technologies": "Python, Django",
         "url": "https://example.com/analytical-engine",
     }
     data.update(overrides)
@@ -585,7 +584,7 @@ def test_candidate_can_create_view_edit_reorder_and_remove_project_entries() -> 
     first_response = client.post(reverse("project_create"), project_data())
     second_response = client.post(
         reverse("project_create"),
-        project_data(name="Open source compiler", technologies="Rust"),
+        project_data(name="Open source compiler"),
     )
     assert first_response.url == reverse("profile")
     assert second_response.url == reverse("profile")
@@ -645,7 +644,6 @@ def test_candidate_can_add_a_project_skill_through_the_shared_catalog() -> None:
     project = Project.objects.create(
         profile=profile,
         name="Legacy project",
-        technologies="Python, Django",
     )
     concept = SkillConcept.objects.create(canonical_name="Node.js")
     SkillAlias.objects.create(concept=concept, display_name="nodejs")
@@ -664,7 +662,7 @@ def test_candidate_can_add_a_project_skill_through_the_shared_catalog() -> None:
     assert project_skill.concept_id == concept.pk
     assert project_skill.position == 0
     profile_response = client.get(reverse("profile"))
-    assert b"Python, Django" in profile_response.content
+    assert b"Legacy technologies" not in profile_response.content
     assert b"NodeJS" in profile_response.content
 
 
@@ -728,7 +726,6 @@ def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on
     project = Project.objects.create(
         profile=profile,
         name="Legacy project",
-        technologies="Python, Django",
     )
     client = Client()
     client.force_login(account)
@@ -739,7 +736,7 @@ def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on
 
     edit_response = client.post(
         reverse("project_edit", args=[project.pk]),
-        project_data(name="Renamed project", technologies=""),
+        project_data(name="Renamed project"),
         headers={"HX-Request": "true"},
     )
     reorder_response = client.post(
@@ -765,7 +762,6 @@ def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on
 
     project.refresh_from_db()
     assert delete_response.headers["HX-Redirect"] == reverse("profile")
-    assert project.technologies == "Python, Django"
     assert list(project.project_skills.values_list("label", flat=True)) == ["Django"]
     assert project.project_skills.get().position == 0
 
