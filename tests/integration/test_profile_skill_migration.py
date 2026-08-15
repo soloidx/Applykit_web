@@ -8,13 +8,14 @@ pytestmark = pytest.mark.integration
 @pytest.mark.django_db(transaction=True)
 def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_concepts() -> None:
     executor = MigrationExecutor(connection)
-    latest = [("profiles", "0011_remove_experienceskill_experience_skill_label_not_blank_and_more")]
+    latest = [("profiles", "0012_remove_project_technologies")]
     executor.migrate([("profiles", "0006_projectskill")])
 
     old_apps = executor.loader.project_state([("profiles", "0006_projectskill")]).apps
     Account = old_apps.get_model("accounts", "Account")
     CandidateProfile = old_apps.get_model("profiles", "CandidateProfile")
     Skill = old_apps.get_model("profiles", "Skill")
+    Project = old_apps.get_model("profiles", "Project")
     first_account = Account.objects.create(email="first@example.com")
     second_account = Account.objects.create(email="second@example.com")
     first_profile = CandidateProfile.objects.create(
@@ -26,6 +27,11 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         account=second_account,
         full_name="Second Candidate",
         timezone="UTC",
+    )
+    legacy_project = Project.objects.create(
+        profile=first_profile,
+        name="Legacy project",
+        technologies="Python, Django",
     )
     Skill.objects.create(
         profile=first_profile,
@@ -53,6 +59,7 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         ProfileSkill = new_apps.get_model("profiles", "ProfileSkill")
         SkillConcept = new_apps.get_model("skills", "SkillConcept")
         SkillAlias = new_apps.get_model("skills", "SkillAlias")
+        Project = new_apps.get_model("profiles", "Project")
 
         migrated = list(ProfileSkill.objects.order_by("profile_id", "position"))
         assert [(skill.label, skill.position) for skill in migrated] == [
@@ -87,6 +94,8 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         )
         assert SkillConcept.objects.filter(canonical_key__in=["python", "ｐython"]).count() == 2
         assert SkillAlias.objects.filter(normalized_value__in=["python", "ｐython"]).count() == 2
+        assert Project.objects.filter(pk=legacy_project.pk).exists()
+        assert "technologies" not in {field.name for field in Project._meta.fields}
     finally:
         executor = MigrationExecutor(connection)
         executor.migrate(latest)

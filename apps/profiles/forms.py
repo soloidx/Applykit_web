@@ -209,6 +209,8 @@ class ProjectForm(forms.ModelForm):
                 "text-ink outline-none transition placeholder:text-ink/35 "
                 "focus:border-coral focus:ring-2 focus:ring-coral/20"
             )
+
+
 class LanguageForm(forms.ModelForm):
     name = forms.CharField(strip=False, label="Language")
 
