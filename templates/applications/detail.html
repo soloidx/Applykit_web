@@ -33,6 +33,10 @@
   <div class="mt-8 rounded-[2rem] border border-ink/10 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
     <h2 class="font-display text-3xl font-semibold">Skill requirements</h2>
     <p class="mt-2 text-ink/65">Keep the wording from the job posting while mapping each requirement to a shared hard-skill concept.</p>
+    <form class="mt-6" method="post" action="{% url 'application_skill_requirement_extract' application.pk %}" hx-post="{% url 'application_skill_requirement_extract' application.pk %}">
+      {% csrf_token %}
+      <button class="rounded-full border border-ink/20 px-5 py-3 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Extract requirements from job description</button>
+    </form>
     <form class="mt-6 grid gap-4" method="post" action="{% url 'application_skill_requirement_create' application.pk %}" hx-post="{% url 'application_skill_requirement_create' application.pk %}" hx-target="#application-detail" hx-select="#application-detail" hx-swap="outerHTML">
       {% csrf_token %}
       {{ requirement_form.non_field_errors }}

@@ -35,6 +35,7 @@ from apps.applications.services import (
     create_recruitment_event,
     delete_application,
     delete_application_skill_requirement,
+    extract_application_skill_requirements,
     remap_application_skill_requirement,
     transition_application,
     update_application_skill_requirement,
@@ -249,6 +250,30 @@ def application_skill_requirement_create(request: HttpRequest, application_id: i
         request,
         "applications/detail.html",
         _application_detail_context(account, application, requirement_form=form),
+    )
+
+
+@login_required
+@verified_account_required
+def application_skill_requirement_extract(
+    request: HttpRequest, application_id: int
+) -> HttpResponse:
+    account = cast(Account, request.user)
+    application = get_object_or_404(JobApplication, pk=application_id, account=account)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+
+    extracted = extract_application_skill_requirements(
+        account=account,
+        application_id=application.pk,
+    )
+    if extracted:
+        messages.success(request, f"Extracted {len(extracted)} skill requirement(s).")
+    else:
+        messages.info(request, "No new skill requirements found.")
+    return _redirect_or_htmx_redirect(
+        request,
+        reverse("application_detail", args=[application.pk]),
     )
 
 

@@ -1012,6 +1012,188 @@ def test_candidate_can_add_skill_requirements_with_aliases_unknown_labels_and_ht
 
 
 @pytest.mark.django_db
+def test_candidate_can_extract_catalog_skills_with_aliases_and_punctuation_boundaries() -> None:
+    account = verified_candidate("requirement-extract@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description=(
+            "Python, NodeJS, C++, C# and .NET. Avoid C++++, C#script, .NETCore, "
+            "PyTorchish and UnknownTool."
+        ),
+    )
+    python = SkillConcept.objects.create(canonical_name="Python")
+    node = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=node, display_name="NodeJS")
+    c_plus_plus = SkillConcept.objects.create(canonical_name="C++")
+    c_sharp = SkillConcept.objects.create(canonical_name="C#")
+    dotnet = SkillConcept.objects.create(canonical_name=".NET")
+    SkillConcept.objects.create(canonical_name="C")
+    SkillConcept.objects.create(canonical_name="NET")
+    client = Client()
+    client.force_login(account)
+
+    extracted = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+    )
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+    repeated = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+        headers={"HX-Request": "true"},
+    )
+
+    assert extracted.status_code == 302
+    assert extracted.headers["Location"] == reverse("application_detail", args=[application.pk])
+    assert repeated.status_code == 200
+    assert repeated.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
+    requirements = list(
+        ApplicationSkillRequirement.objects.filter(application=application).order_by("pk")
+    )
+    assert [(requirement.concept_id, requirement.label) for requirement in requirements] == [
+        (python.pk, "Python"),
+        (node.pk, "NodeJS"),
+        (c_plus_plus.pk, "C++"),
+        (c_sharp.pk, "C#"),
+        (dotnet.pk, ".NET"),
+    ]
+    assert all(
+        requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
+        for requirement in requirements
+    )
+    assert b"Extract requirements" in detail.content
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 5
+    assert SkillConcept.objects.filter(canonical_key="unknowntool").exists() is False
+
+
+@pytest.mark.django_db
+def test_extraction_preserves_source_wording_for_normalized_unicode_matches() -> None:
+    account = verified_candidate("requirement-extract-unicode@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Cafe\N{COMBINING ACUTE ACCENT} experience preferred.",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Caf\N{LATIN SMALL LETTER E WITH ACUTE}")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+    )
+
+    requirement = ApplicationSkillRequirement.objects.get(application=application)
+    assert response.status_code == 302
+    assert requirement.concept_id == concept.pk
+    assert requirement.label == "Cafe\N{COMBINING ACUTE ACCENT}"
+
+
+@pytest.mark.django_db
+def test_extraction_preserves_reviewed_and_manual_requirements_and_retains_stale_matches() -> None:
+    account = verified_candidate("requirement-extract-preserve@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Python and Node.js are useful.",
+    )
+    python = SkillConcept.objects.create(canonical_name="Python")
+    node = SkillConcept.objects.create(canonical_name="Node.js")
+    django = SkillConcept.objects.create(canonical_name="Django")
+    client = Client()
+    client.force_login(account)
+
+    created_reviewed = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {"label": "Python", "classification": ApplicationSkillRequirement.Classification.REQUIRED},
+    )
+    reviewed = ApplicationSkillRequirement.objects.get(application=application, concept=python)
+    edited_reviewed = client.post(
+        reverse("application_skill_requirement_edit", args=[application.pk, reviewed.pk]),
+        {
+            "label": "Python in production",
+            "classification": ApplicationSkillRequirement.Classification.REQUIRED,
+        },
+    )
+    created_manual = client.post(
+        reverse("application_skill_requirement_create", args=[application.pk]),
+        {
+            "label": "Django",
+            "classification": ApplicationSkillRequirement.Classification.REQUIRED,
+        },
+    )
+    manual = ApplicationSkillRequirement.objects.get(application=application, concept=django)
+    edited_manual = client.post(
+        reverse("application_skill_requirement_edit", args=[application.pk, manual.pk]),
+        {
+            "label": "Django REST Framework",
+            "classification": ApplicationSkillRequirement.Classification.REQUIRED,
+        },
+    )
+    first = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+    )
+    application.job_description = "Node.js is useful."
+    application.save(update_fields=["job_description"])
+    second = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+    )
+
+    reviewed.refresh_from_db()
+    manual.refresh_from_db()
+    node_requirement = ApplicationSkillRequirement.objects.get(
+        application=application, concept=node
+    )
+    assert created_reviewed.status_code == 302
+    assert edited_reviewed.status_code == 302
+    assert created_manual.status_code == 302
+    assert edited_manual.status_code == 302
+    assert first.status_code == 302
+    assert second.status_code == 302
+    assert reviewed.label == "Python in production"
+    assert reviewed.classification == ApplicationSkillRequirement.Classification.REQUIRED
+    assert manual.label == "Django REST Framework"
+    assert manual.classification == ApplicationSkillRequirement.Classification.REQUIRED
+    assert node_requirement.label == "Node.js"
+    assert node_requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 3
+
+
+@pytest.mark.django_db
+def test_skill_requirement_extraction_is_private_to_the_application_owner() -> None:
+    owner = verified_candidate("requirement-extract-owner@example.com")
+    intruder = verified_candidate("requirement-extract-intruder@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=owner,
+        campaign=Campaign.objects.get(account=owner),
+        company=company,
+        role_title="Private role",
+        job_description="Python is required.",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    client = Client()
+    client.force_login(intruder)
+
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+    attempted_extraction = client.post(
+        reverse("application_skill_requirement_extract", args=[application.pk]),
+    )
+
+    assert detail.status_code == 404
+    assert attempted_extraction.status_code == 404
+    assert ApplicationSkillRequirement.objects.filter(application=application).exists() is False
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
+
+
+@pytest.mark.django_db
 def test_candidate_can_edit_requirement_wording_without_remapping_and_can_deliberately_remap() -> (
     None
 ):

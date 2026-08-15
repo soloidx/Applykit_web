@@ -1,3 +1,6 @@
+import re
+import unicodedata
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -18,6 +21,7 @@ from apps.applications.models import (
     StageTransition,
 )
 from apps.profiles.models import CandidateProfile
+from apps.skills.models import SkillAlias, SkillConcept
 from apps.skills.services import resolve_skill_label
 
 
@@ -235,6 +239,101 @@ def create_application_skill_requirement(
     requirement.full_clean()
     requirement.save()
     return requirement
+
+
+_SKILL_BOUNDARY_CHARS = r"\w+#./&-"
+
+
+def _normalized_text_with_source_spans(value: str) -> tuple[str, list[tuple[int, int]]]:
+    normalized_value = unicodedata.normalize("NFKC", value).casefold()
+    prefix_lengths = [
+        len(unicodedata.normalize("NFKC", value[:source_end]).casefold())
+        for source_end in range(len(value) + 1)
+    ]
+    source_spans: list[tuple[int, int]] = []
+    for normalized_index in range(len(normalized_value)):
+        source_end = bisect_left(prefix_lengths, normalized_index + 1)
+        while (
+            source_end + 1 < len(prefix_lengths)
+            and prefix_lengths[source_end + 1] == prefix_lengths[source_end]
+        ):
+            source_end += 1
+        source_start = bisect_right(prefix_lengths, normalized_index, hi=source_end) - 1
+        source_spans.append((source_start, source_end))
+    return normalized_value, source_spans
+
+
+def _catalog_skill_matches(job_description: str) -> list[tuple[SkillConcept, str]]:
+    normalized_description, source_spans = _normalized_text_with_source_spans(job_description)
+    catalog: dict[str, tuple[SkillConcept, int]] = {}
+    for alias in SkillAlias.objects.select_related("concept").all():
+        catalog.setdefault(alias.normalized_value, (alias.concept, alias.pk))
+    for concept in SkillConcept.objects.all():
+        catalog.setdefault(concept.canonical_key, (concept, concept.pk))
+
+    candidates: list[tuple[int, int, int, SkillConcept, str]] = []
+    for normalized_label, (concept, catalog_id) in catalog.items():
+        if not normalized_label:
+            continue
+        pattern = re.compile(
+            rf"(?<![{_SKILL_BOUNDARY_CHARS}]){re.escape(normalized_label)}"
+            rf"(?![\w+#/&-]|\.(?=\w))"
+        )
+        for match in pattern.finditer(normalized_description):
+            source_start = source_spans[match.start()][0]
+            source_end = source_spans[match.end() - 1][1]
+            candidates.append(
+                (
+                    source_start,
+                    -(match.end() - match.start()),
+                    catalog_id,
+                    concept,
+                    job_description[source_start:source_end],
+                )
+            )
+
+    matches: list[tuple[SkillConcept, str]] = []
+    matched_concepts: set[int] = set()
+    occupied_spans: list[tuple[int, int]] = []
+    for source_start, _negative_length, _catalog_id, concept, source_label in sorted(candidates):
+        source_end = source_start + len(source_label)
+        if concept.pk in matched_concepts or any(
+            source_start < occupied_end and source_end > occupied_start
+            for occupied_start, occupied_end in occupied_spans
+        ):
+            continue
+        matched_concepts.add(concept.pk)
+        occupied_spans.append((source_start, source_end))
+        matches.append((concept, source_label))
+    return matches
+
+
+@transaction.atomic
+def extract_application_skill_requirements(
+    *, account: Account, application_id: int
+) -> tuple[ApplicationSkillRequirement, ...]:
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
+    )
+    existing_concepts = set(
+        application.skill_requirements.values_list("concept_id", flat=True)
+    )
+    extracted: list[ApplicationSkillRequirement] = []
+    for concept, source_label in _catalog_skill_matches(application.job_description):
+        if concept.pk in existing_concepts:
+            continue
+        requirement = ApplicationSkillRequirement(
+            application=application,
+            concept=concept,
+            label=source_label,
+            classification=ApplicationSkillRequirement.Classification.PREFERRED,
+        )
+        requirement.full_clean()
+        requirement.save()
+        existing_concepts.add(concept.pk)
+        extracted.append(requirement)
+    return tuple(extracted)
 
 
 @transaction.atomic

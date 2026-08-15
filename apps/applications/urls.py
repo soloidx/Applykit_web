@@ -9,6 +9,7 @@ from apps.applications.views import (
     application_skill_requirement_create,
     application_skill_requirement_delete,
     application_skill_requirement_edit,
+    application_skill_requirement_extract,
     application_skill_requirement_remap,
     recruitment_event_create,
     recruitment_event_edit,
@@ -23,6 +24,11 @@ urlpatterns = [
         "applications/<int:application_id>/skills/new/",
         application_skill_requirement_create,
         name="application_skill_requirement_create",
+    ),
+    path(
+        "applications/<int:application_id>/skills/extract/",
+        application_skill_requirement_extract,
+        name="application_skill_requirement_extract",
     ),
     path(
         "applications/<int:application_id>/skills/<int:requirement_id>/edit/",
