@@ -11,6 +11,14 @@ def normalize_skill_label(value: str) -> str:
     return unicodedata.normalize("NFKC", value.strip()).casefold()
 
 
+def clean_skill_label(value: str) -> str:
+    """Trim an entered skill label while preserving its display text."""
+    label = value.strip()
+    if not label:
+        raise ValidationError("Enter a hard-skill label.")
+    return label
+
+
 class SkillConcept(models.Model):
     canonical_name = models.CharField(max_length=200)
     canonical_key = models.CharField(max_length=200, unique=True, editable=False)
@@ -26,10 +34,8 @@ class SkillConcept(models.Model):
         return self.canonical_name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.canonical_name = self.canonical_name.strip()
+        self.canonical_name = clean_skill_label(self.canonical_name)
         self.canonical_key = normalize_skill_label(self.canonical_name)
-        if not self.canonical_key:
-            raise ValidationError("Enter a skill concept name.")
 
         adding = self._state.adding
         with transaction.atomic():
@@ -71,8 +77,6 @@ class SkillAlias(models.Model):
         return self.display_name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.display_name = self.display_name.strip()
+        self.display_name = clean_skill_label(self.display_name)
         self.normalized_value = normalize_skill_label(self.display_name)
-        if not self.normalized_value:
-            raise ValidationError("Enter a skill alias.")
         super().save(*args, **kwargs)

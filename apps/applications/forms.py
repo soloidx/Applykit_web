@@ -11,6 +11,7 @@ from apps.applications.models import (
     JobApplication,
     RecruitmentEvent,
 )
+from apps.skills.models import clean_skill_label
 
 
 class JobApplicationCreateForm(forms.ModelForm):
@@ -71,10 +72,7 @@ class ApplicationSkillRequirementCreateForm(forms.Form):
     )
 
     def clean_label(self) -> str:
-        value = self.cleaned_data["label"].strip()
-        if not value:
-            raise forms.ValidationError("Enter a hard-skill label.")
-        return value
+        return clean_skill_label(self.cleaned_data["label"])
 
 
 class ApplicationSkillRequirementEditForm(ApplicationSkillRequirementCreateForm):
@@ -85,10 +83,7 @@ class ApplicationSkillRequirementRemapForm(forms.Form):
     label = forms.CharField(max_length=200, required=False, label="New skill label")
 
     def clean_label(self) -> str:
-        value = self.cleaned_data["label"].strip()
-        if not value:
-            raise forms.ValidationError("Enter a hard-skill label.")
-        return value
+        return clean_skill_label(self.cleaned_data["label"])
 
 
 class RecruitmentEventForm(forms.ModelForm):

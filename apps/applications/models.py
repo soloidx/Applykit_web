@@ -7,7 +7,7 @@ from django.db import models
 from django.db.models import Q
 
 from apps.campaigns.models import Campaign
-from apps.skills.models import SkillConcept, normalize_skill_label
+from apps.skills.models import SkillConcept, clean_skill_label
 
 
 class Company(models.Model):
@@ -83,7 +83,6 @@ class ApplicationSkillRequirement(models.Model):
         related_name="application_requirements",
     )
     label = models.CharField(max_length=200)
-    normalized_label = models.CharField(max_length=200, editable=False)
     classification = models.CharField(max_length=16, choices=Classification.choices)
     edit_form: Any
     remap_form: Any
@@ -96,7 +95,7 @@ class ApplicationSkillRequirement(models.Model):
                 name="application_skill_requirement_unique_concept",
             ),
             models.CheckConstraint(
-                condition=~Q(normalized_label=""),
+                condition=~Q(label=""),
                 name="application_skill_requirement_label_not_blank",
             ),
             models.CheckConstraint(
@@ -110,18 +109,15 @@ class ApplicationSkillRequirement(models.Model):
 
     def clean(self) -> None:
         super().clean()
-        self.label = self.label.strip()
-        self.normalized_label = normalize_skill_label(self.label)
-        if not self.normalized_label:
-            raise ValidationError({"label": "Enter a hard-skill label."})
+        try:
+            self.label = clean_skill_label(self.label)
+        except ValidationError as error:
+            raise ValidationError({"label": error.messages}) from error
         if self.classification not in self.Classification.values:
             raise ValidationError({"classification": "Select a valid requirement classification."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = self.label.strip()
-        self.normalized_label = normalize_skill_label(self.label)
-        if not self.normalized_label:
-            raise ValidationError("Enter a hard-skill label.")
+        self.label = clean_skill_label(self.label)
         super().save(*args, **kwargs)
 
 

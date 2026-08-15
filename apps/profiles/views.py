@@ -14,12 +14,10 @@ from apps.profiles.forms import (
     CandidateProfileForm,
     EducationForm,
     ExperienceForm,
-    ExperienceSkillForm,
     HighlightForm,
     LanguageForm,
     ProjectForm,
-    ProjectSkillForm,
-    SkillForm,
+    SkillAssociationForm,
 )
 from apps.profiles.models import (
     CandidateProfile,
@@ -44,7 +42,7 @@ def _profile_context(
     *,
     experience_form: ExperienceForm | None = None,
     experience_form_action: str | None = None,
-    experience_skill_form: ExperienceSkillForm | None = None,
+    experience_skill_form: SkillAssociationForm | None = None,
     experience_skill_experience: Experience | None = None,
     highlight_form: HighlightForm | None = None,
     highlight_experience: Experience | None = None,
@@ -53,9 +51,9 @@ def _profile_context(
     education_form_action: str | None = None,
     project_form: ProjectForm | None = None,
     project_form_action: str | None = None,
-    project_skill_form: ProjectSkillForm | None = None,
+    project_skill_form: SkillAssociationForm | None = None,
     project_skill_project: Project | None = None,
-    skill_form: SkillForm | None = None,
+    skill_form: SkillAssociationForm | None = None,
     skill_form_action: str | None = None,
     language_form: LanguageForm | None = None,
     language_form_action: str | None = None,
@@ -69,7 +67,7 @@ def _profile_context(
         "experience_form_action": experience_form_action or reverse("experience_create"),
         "experience_skill_form": experience_skill_form
         if experience_skill_form is not None
-        else ExperienceSkillForm(),
+        else SkillAssociationForm(),
         "experience_skill_experience": experience_skill_experience,
         "experience": experience_skill_experience,
         "highlight_form": highlight_form,
@@ -83,13 +81,13 @@ def _profile_context(
         "project_form_action": project_form_action or reverse("project_create"),
         "project_skill_form": project_skill_form
         if project_skill_form is not None
-        else ProjectSkillForm(),
+        else SkillAssociationForm(),
         "project_skill_project": project_skill_project,
         "project": project_skill_project,
         "skills": candidate_profile.profile_skills.all(),
         "skill_form": skill_form
         if skill_form is not None
-        else SkillForm(profile=candidate_profile),
+        else SkillAssociationForm(),
         "skill_form_action": skill_form_action or reverse("skill_create"),
         "languages": candidate_profile.languages.all(),
         "language_form": language_form
@@ -329,7 +327,7 @@ def experience_reorder(request: HttpRequest, experience_id: int) -> HttpResponse
 def experience_skill_create(request: HttpRequest, experience_id: int) -> HttpResponse:
     account = cast(Account, request.user)
     experience = _experience_for_account(account, experience_id)
-    form = ExperienceSkillForm(request.POST or None)
+    form = SkillAssociationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
             with transaction.atomic():
@@ -585,7 +583,7 @@ def project_reorder(request: HttpRequest, project_id: int) -> HttpResponse:
 def project_skill_create(request: HttpRequest, project_id: int) -> HttpResponse:
     account = cast(Account, request.user)
     project = _project_for_account(account, project_id)
-    form = ProjectSkillForm(request.POST or None)
+    form = SkillAssociationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
             with transaction.atomic():
@@ -748,7 +746,7 @@ def highlight_reorder(request: HttpRequest, experience_id: int, highlight_id: in
 def skill_create(request: HttpRequest) -> HttpResponse:
     account = cast(Account, request.user)
     candidate_profile = _profile_for_account(account)
-    form = SkillForm(request.POST or None, profile=candidate_profile)
+    form = SkillAssociationForm(request.POST or None)
     action = reverse("skill_create")
     if request.method == "POST" and form.is_valid():
         try:
@@ -756,13 +754,13 @@ def skill_create(request: HttpRequest) -> HttpResponse:
                 locked_profile = CandidateProfile.objects.select_for_update().get(
                     pk=candidate_profile.pk
                 )
-                entered_label = form.cleaned_data["name"]
+                entered_label = form.cleaned_data["label"]
                 concept, _ = resolve_skill_label(entered_label)
                 if ProfileSkill.objects.filter(
                     profile=locked_profile,
                     concept=concept,
                 ).exists():
-                    form.add_error("name", "This skill is already in your profile.")
+                    form.add_error("label", "This skill is already in your profile.")
                 else:
                     ProfileSkill.objects.create(
                         profile=locked_profile,
@@ -771,7 +769,7 @@ def skill_create(request: HttpRequest) -> HttpResponse:
                         position=locked_profile.profile_skills.count(),
                     )
         except IntegrityError:
-            form.add_error("name", "This skill is already in your profile.")
+            form.add_error("label", "This skill is already in your profile.")
         if not form.errors:
             return _redirect_or_htmx_redirect(request)
 

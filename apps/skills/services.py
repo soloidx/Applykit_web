@@ -5,15 +5,12 @@ from time import sleep
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, OperationalError, connection, transaction
 
-from apps.skills.models import SkillAlias, SkillConcept, normalize_skill_label
-
-
-def _skill_label_parts(label: str) -> tuple[str, str]:
-    display_name = label.strip()
-    normalized_value = normalize_skill_label(display_name)
-    if not normalized_value:
-        raise ValidationError("Enter a hard-skill label.")
-    return display_name, normalized_value
+from apps.skills.models import (
+    SkillAlias,
+    SkillConcept,
+    clean_skill_label,
+    normalize_skill_label,
+)
 
 
 def _resolved_skill_label(normalized_value: str) -> SkillAlias | None:
@@ -43,7 +40,8 @@ def _resolve_skill_label(display_name: str, normalized_value: str) -> tuple[Skil
 
 def resolve_skill_label(label: str) -> tuple[SkillConcept, bool]:
     """Resolve an exact public skill label or create its shared concept."""
-    display_name, normalized_value = _skill_label_parts(label)
+    display_name = clean_skill_label(label)
+    normalized_value = normalize_skill_label(display_name)
     for attempt in range(5):
         try:
             return _resolve_skill_label(display_name, normalized_value)
@@ -69,7 +67,8 @@ def resolve_skill_label(label: str) -> tuple[SkillConcept, bool]:
 @transaction.atomic
 def rename_skill_concept(*, concept: SkillConcept, canonical_name: str) -> SkillConcept:
     """Change a canonical label without changing the concept identity."""
-    display_name, normalized_value = _skill_label_parts(canonical_name)
+    display_name = clean_skill_label(canonical_name)
+    normalized_value = normalize_skill_label(display_name)
     locked_concept = SkillConcept.objects.select_for_update().get(pk=concept.pk)
     current_canonical = SkillAlias.objects.select_for_update().get(
         concept=locked_concept,

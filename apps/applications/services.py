@@ -21,7 +21,7 @@ from apps.applications.models import (
     StageTransition,
 )
 from apps.profiles.models import CandidateProfile
-from apps.skills.models import SkillAlias, SkillConcept
+from apps.skills.models import SkillAlias, SkillConcept, clean_skill_label
 from apps.skills.services import resolve_skill_label
 
 
@@ -205,10 +205,10 @@ def _requirement_classification(value: str) -> str:
 
 
 def _requirement_label(value: str) -> str:
-    label = value.strip()
-    if not label:
-        raise ValidationError({"label": "Enter a hard-skill label."})
-    return label
+    try:
+        return clean_skill_label(value)
+    except ValidationError as error:
+        raise ValidationError({"label": error.messages}) from error
 
 
 @transaction.atomic
@@ -353,7 +353,7 @@ def update_application_skill_requirement(
     requirement.label = _requirement_label(label)
     requirement.classification = _requirement_classification(classification)
     requirement.full_clean()
-    requirement.save(update_fields=["label", "normalized_label", "classification"])
+    requirement.save(update_fields=["label", "classification"])
     return requirement
 
 
@@ -381,7 +381,7 @@ def remap_application_skill_requirement(
     requirement.concept = concept
     requirement.label = display_label
     requirement.full_clean()
-    requirement.save(update_fields=["concept", "label", "normalized_label"])
+    requirement.save(update_fields=["concept", "label"])
     return requirement
 
 

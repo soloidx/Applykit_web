@@ -6,7 +6,7 @@ import pytest
 from allauth.account.models import EmailAddress
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import Client
 from django.urls import reverse
 
@@ -482,7 +482,7 @@ def project_data(**overrides: str) -> dict[str, str]:
 
 
 def skill_data(**overrides: str) -> dict[str, str]:
-    data = {"name": "Python"}
+    data = {"label": "Python"}
     data.update(overrides)
     return data
 
@@ -932,19 +932,19 @@ def test_candidate_can_manage_ordered_unique_skills() -> None:
     first_response = client.post(reverse("skill_create"), skill_data())
     second_response = client.post(
         reverse("skill_create"),
-        skill_data(name="Django"),
+        skill_data(label="Django"),
         headers={"HX-Request": "true"},
     )
-    third_response = client.post(reverse("skill_create"), skill_data(name="Rust"))
-    duplicate_response = client.post(reverse("skill_create"), skill_data(name=" python "))
-    whitespace_response = client.post(reverse("skill_create"), skill_data(name="   "))
+    third_response = client.post(reverse("skill_create"), skill_data(label="Rust"))
+    duplicate_response = client.post(reverse("skill_create"), skill_data(label=" python "))
+    whitespace_response = client.post(reverse("skill_create"), skill_data(label="   "))
 
     assert first_response.url == reverse("profile")
     assert second_response.headers["HX-Redirect"] == reverse("profile")
     assert third_response.url == reverse("profile")
     assert duplicate_response.status_code == 200
     assert whitespace_response.status_code == 200
-    assert b"Enter a skill." in whitespace_response.content
+    assert b"Enter a hard-skill label." in whitespace_response.content
     assert b"already" in duplicate_response.content
     assert list(ProfileSkill.objects.values_list("label", flat=True)) == [
         "Python",
@@ -1114,7 +1114,7 @@ def test_experience_skills_can_repeat_a_concept_across_experiences_and_profile()
         reverse("experience_skill_create", args=[second_experience.pk]),
         {"label": "python"},
     )
-    client.post(reverse("skill_create"), {"name": "PYTHON"})
+    client.post(reverse("skill_create"), {"label": "PYTHON"})
 
     concept = SkillConcept.objects.get(canonical_key="python")
     profile_response = client.get(reverse("profile"))
@@ -1215,15 +1215,15 @@ def test_profile_skills_resolve_catalog_aliases_and_preserve_entered_labels() ->
     client = Client()
     client.force_login(account)
 
-    first_response = client.post(reverse("skill_create"), skill_data(name="NodeJS"))
+    first_response = client.post(reverse("skill_create"), skill_data(label="NodeJS"))
     duplicate_response = client.post(
         reverse("skill_create"),
-        skill_data(name="node.js"),
+        skill_data(label="node.js"),
         headers={"HX-Request": "true"},
     )
     unknown_response = client.post(
         reverse("skill_create"),
-        skill_data(name="  Elixir  "),
+        skill_data(label="  Elixir  "),
     )
 
     assert first_response.url == reverse("profile")
@@ -1233,6 +1233,55 @@ def test_profile_skills_resolve_catalog_aliases_and_preserve_entered_labels() ->
     assert list(
         ProfileSkill.objects.filter(profile=profile).values_list("label", "concept__canonical_name")
     ) == [("NodeJS", "Node.js"), ("Elixir", "Elixir")]
+
+
+@pytest.mark.django_db
+def test_skill_association_schema_has_label_constraints_without_normalized_columns() -> None:
+    account = verified_account("skill-schema@example.com")
+    profile = create_profile(account)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        start_date="2020-01-01",
+    )
+    project = Project.objects.create(profile=profile, name="Example project")
+    concept, _ = resolve_skill_label("Python")
+    models_and_constraints = (
+        (ProfileSkill, profile, "profile_skill_label_not_blank"),
+        (ExperienceSkill, experience, "experience_skill_label_not_blank"),
+        (ProjectSkill, project, "project_skill_label_not_blank"),
+    )
+
+    with connection.cursor() as cursor:
+        for model, _owner, constraint_name in models_and_constraints:
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(
+                    cursor, model._meta.db_table
+                )
+            }
+            assert "normalized_label" not in columns
+            assert constraint_name in {constraint.name for constraint in model._meta.constraints}
+
+    with pytest.raises(IntegrityError):
+        model, owner, _ = models_and_constraints[0]
+        with transaction.atomic():
+            model.objects.bulk_create(
+                [model(profile=owner, concept=concept, label="", position=0)]
+            )
+    with pytest.raises(IntegrityError):
+        model, owner, _ = models_and_constraints[1]
+        with transaction.atomic():
+            model.objects.bulk_create(
+                [model(experience=owner, concept=concept, label="", position=0)]
+            )
+    with pytest.raises(IntegrityError):
+        model, owner, _ = models_and_constraints[2]
+        with transaction.atomic():
+            model.objects.bulk_create(
+                [model(project=owner, concept=concept, label="", position=0)]
+            )
 
 
 @pytest.mark.django_db

@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 
-from apps.skills.models import SkillConcept, normalize_skill_label
+from apps.skills.models import SkillConcept, clean_skill_label
 
 IANA_TIMEZONES = frozenset(available_timezones())
 
@@ -98,7 +98,6 @@ class ExperienceSkill(models.Model):
         related_name="experience_skills",
     )
     label = models.CharField(max_length=200)
-    normalized_label = models.CharField(max_length=200, editable=False)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -109,7 +108,7 @@ class ExperienceSkill(models.Model):
                 name="experience_skill_unique_concept",
             ),
             models.CheckConstraint(
-                condition=~Q(normalized_label=""),
+                condition=~Q(label=""),
                 name="experience_skill_label_not_blank",
             ),
         ]
@@ -118,10 +117,7 @@ class ExperienceSkill(models.Model):
         return self.label
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = self.label.strip()
-        self.normalized_label = normalize_skill_label(self.label)
-        if not self.normalized_label:
-            raise ValidationError("Enter a hard-skill label.")
+        self.label = clean_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_experience_skill = (
                 ExperienceSkill.objects.filter(experience=self.experience)
@@ -235,7 +231,6 @@ class ProjectSkill(models.Model):
         related_name="project_skills",
     )
     label = models.CharField(max_length=200)
-    normalized_label = models.CharField(max_length=200, editable=False)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -246,7 +241,7 @@ class ProjectSkill(models.Model):
                 name="project_skill_unique_concept",
             ),
             models.CheckConstraint(
-                condition=~Q(normalized_label=""),
+                condition=~Q(label=""),
                 name="project_skill_label_not_blank",
             ),
         ]
@@ -255,10 +250,7 @@ class ProjectSkill(models.Model):
         return self.label
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = self.label.strip()
-        self.normalized_label = normalize_skill_label(self.label)
-        if not self.normalized_label:
-            raise ValidationError("Enter a hard-skill label.")
+        self.label = clean_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_project_skill = (
                 ProjectSkill.objects.filter(project=self.project)
@@ -281,7 +273,6 @@ class ProfileSkill(models.Model):
         related_name="profile_skills",
     )
     label = models.CharField(max_length=200)
-    normalized_label = models.CharField(max_length=200, editable=False)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -293,7 +284,7 @@ class ProfileSkill(models.Model):
                 name="profile_skill_unique_concept",
             ),
             models.CheckConstraint(
-                condition=~Q(normalized_label=""),
+                condition=~Q(label=""),
                 name="profile_skill_label_not_blank",
             ),
         ]
@@ -302,10 +293,7 @@ class ProfileSkill(models.Model):
         return self.label
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = self.label.strip()
-        self.normalized_label = normalize_skill_label(self.label)
-        if not self.normalized_label:
-            raise ValidationError("Enter a hard-skill label.")
+        self.label = clean_skill_label(self.label)
         if self.concept_id is None:
             from apps.skills.services import resolve_skill_label
 

@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.db import IntegrityError, connection, transaction
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
@@ -1012,6 +1013,50 @@ def test_candidate_can_add_skill_requirements_with_aliases_unknown_labels_and_ht
 
 
 @pytest.mark.django_db
+def test_application_skill_requirement_schema_has_label_constraint_without_normalized_column() -> (
+    None
+):
+    account = verified_candidate("requirement-schema@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    concept, _ = SkillConcept.objects.get_or_create(
+        canonical_key="python", defaults={"canonical_name": "Python"}
+    )
+    model = ApplicationSkillRequirement
+
+    with connection.cursor() as cursor:
+        columns = {
+            column.name
+            for column in connection.introspection.get_table_description(
+                cursor, model._meta.db_table
+            )
+        }
+    assert "normalized_label" not in columns
+    assert "application_skill_requirement_label_not_blank" in {
+        constraint.name for constraint in model._meta.constraints
+    }
+
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            model.objects.bulk_create(
+                [
+                    model(
+                        application=application,
+                        concept=concept,
+                        label="",
+                        classification=model.Classification.REQUIRED,
+                    )
+                ]
+            )
+
+
+@pytest.mark.django_db
 def test_candidate_can_extract_catalog_skills_with_aliases_and_punctuation_boundaries() -> None:
     account = verified_candidate("requirement-extract@example.com")
     company, _ = create_or_reuse_company("Example", "example.com")
@@ -1487,7 +1532,7 @@ def test_application_detail_recalculates_live_coverage_after_changes() -> None:
     client.force_login(account)
 
     missing = client.get(reverse("application_detail", args=[application.pk]))
-    created_skill = client.post(reverse("skill_create"), {"name": "Python"})
+    created_skill = client.post(reverse("skill_create"), {"label": "Python"})
     matched = client.get(reverse("application_detail", args=[application.pk]))
     remapped_requirement = client.post(
         reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),

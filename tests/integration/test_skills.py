@@ -8,7 +8,8 @@ from django.test import Client
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.skills.models import SkillAlias, SkillConcept
+from apps.profiles.forms import SkillAssociationForm
+from apps.skills.models import SkillAlias, SkillConcept, clean_skill_label
 from apps.skills.services import normalize_skill_label, resolve_skill_label
 
 pytestmark = pytest.mark.integration
@@ -16,8 +17,19 @@ pytestmark = pytest.mark.integration
 
 @pytest.mark.django_db
 def test_skill_labels_are_trimmed_and_unicode_casefolded() -> None:
+    assert clean_skill_label("  Node.js  ") == "Node.js"
+    assert clean_skill_label("Node  JS") == "Node  JS"
     assert normalize_skill_label("  Straße  ") == "strasse"
     assert normalize_skill_label("  ") == ""
+
+
+@pytest.mark.django_db
+def test_skill_association_paths_share_the_label_form_adapter() -> None:
+    form = SkillAssociationForm({"label": "  C++  "})
+
+    assert form.is_valid()
+    assert form.cleaned_data["label"] == "C++"
+    assert set(form.fields) == {"label"}
 
 
 @pytest.mark.django_db
@@ -89,6 +101,8 @@ def test_canonical_names_and_aliases_share_one_global_namespace() -> None:
 
 @pytest.mark.django_db
 def test_empty_skill_labels_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        clean_skill_label(" \t ")
     with pytest.raises(ValidationError):
         resolve_skill_label(" \t ")
 
