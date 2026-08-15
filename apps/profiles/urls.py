@@ -9,6 +9,9 @@ from apps.profiles.views import (
     experience_delete,
     experience_edit,
     experience_reorder,
+    experience_skill_create,
+    experience_skill_delete,
+    experience_skill_reorder,
     highlight_create,
     highlight_delete,
     highlight_edit,
@@ -47,6 +50,21 @@ urlpatterns = [
         "profile/experience/<int:experience_id>/reorder/",
         experience_reorder,
         name="experience_reorder",
+    ),
+    path(
+        "profile/experiences/<int:experience_id>/skills/new/",
+        experience_skill_create,
+        name="experience_skill_create",
+    ),
+    path(
+        "profile/experience-skills/<int:experience_skill_id>/delete/",
+        experience_skill_delete,
+        name="experience_skill_delete",
+    ),
+    path(
+        "profile/experience-skills/<int:experience_skill_id>/reorder/",
+        experience_skill_reorder,
+        name="experience_skill_reorder",
     ),
     path("profile/education/new/", education_create, name="education_create"),
     path(

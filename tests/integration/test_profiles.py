@@ -17,6 +17,7 @@ from apps.profiles.models import (
     CandidateProfile,
     Education,
     Experience,
+    ExperienceSkill,
     Highlight,
     Language,
     ProfileSkill,
@@ -973,6 +974,236 @@ def test_candidate_can_manage_ordered_unique_skills() -> None:
     assert htmx_delete_response.headers["HX-Redirect"] == reverse("profile")
     assert list(ProfileSkill.objects.values_list("label", flat=True)) == ["Rust"]
     assert ProfileSkill.objects.get().position == 0
+
+
+@pytest.mark.django_db
+def test_experience_skills_resolve_aliases_preserve_labels_and_stay_independent() -> None:
+    account = verified_account("experience-skill-catalog@example.com")
+    profile = create_profile(account)
+    first_experience = Experience.objects.create(
+        profile=profile,
+        role="Senior engineer",
+        organization="First Company",
+        start_date="2020-01-01",
+    )
+    second_experience = Experience.objects.create(
+        profile=profile,
+        role="Staff engineer",
+        organization="Second Company",
+        start_date="2023-01-01",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="nodejs")
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(
+        reverse("experience_skill_create", args=[first_experience.pk]),
+        {"label": "NodeJS"},
+    )
+    second_response = client.post(
+        reverse("experience_skill_create", args=[second_experience.pk]),
+        {"label": "Elixir"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert first_response.url == reverse("profile")
+    assert second_response.headers["HX-Redirect"] == reverse("profile")
+    assert list(ExperienceSkill.objects.values_list("experience_id", "label", "concept_id")) == [
+        (first_experience.pk, "NodeJS", concept.pk),
+        (second_experience.pk, "Elixir", SkillConcept.objects.get(canonical_key="elixir").pk),
+    ]
+    assert not ProfileSkill.objects.filter(profile=profile).exists()
+
+
+@pytest.mark.django_db
+def test_experience_skills_support_duplicate_feedback_blank_validation_and_ordered_management() -> (
+    None
+):
+    account = verified_account("experience-skill-management@example.com")
+    profile = create_profile(account)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Senior engineer",
+        organization="First Company",
+        start_date="2020-01-01",
+    )
+    python, _ = resolve_skill_label("Python")
+    SkillAlias.objects.create(concept=python, display_name="py")
+    client = Client()
+    client.force_login(account)
+
+    first_response = client.post(
+        reverse("experience_skill_create", args=[experience.pk]),
+        {"label": "Python"},
+    )
+    second_response = client.post(
+        reverse("experience_skill_create", args=[experience.pk]),
+        {"label": "Django"},
+    )
+    duplicate_response = client.post(
+        reverse("experience_skill_create", args=[experience.pk]),
+        {"label": "py"},
+        headers={"HX-Request": "true"},
+    )
+    catalog_count_before_blank = SkillConcept.objects.count()
+    blank_response = client.post(
+        reverse("experience_skill_create", args=[experience.pk]),
+        {"label": "  "},
+        headers={"HX-Request": "true"},
+    )
+    profile_response_before_reorder = client.get(reverse("profile"))
+    first, second = ExperienceSkill.objects.order_by("position")
+    reorder_response = client.post(
+        reverse("experience_skill_reorder", args=[second.pk]),
+        {"direction": "up"},
+    )
+    htmx_reorder_response = client.post(
+        reverse("experience_skill_reorder", args=[second.pk]),
+        {"direction": "down"},
+        headers={"HX-Request": "true"},
+    )
+    delete_response = client.post(
+        reverse("experience_skill_delete", args=[first.pk]),
+        headers={"HX-Request": "true"},
+    )
+    profile_response = client.get(reverse("profile"))
+
+    assert first_response.url == reverse("profile")
+    assert second_response.url == reverse("profile")
+    assert duplicate_response.status_code == 200
+    assert b"already used in this experience" in duplicate_response.content
+    assert blank_response.status_code == 200
+    assert b"Enter a hard-skill label" in blank_response.content
+    assert SkillConcept.objects.count() == catalog_count_before_blank
+    rendered_skills = profile_response_before_reorder.content
+    assert rendered_skills.index(b">Python</span>") < rendered_skills.index(b">Django</span>")
+    assert reorder_response.url == reverse("profile")
+    assert htmx_reorder_response.headers["HX-Redirect"] == reverse("profile")
+    assert delete_response.headers["HX-Redirect"] == reverse("profile")
+    assert profile_response.status_code == 200
+    assert b"Experience skills" in profile_response.content
+    assert list(experience.experience_skills.values_list("label", flat=True)) == ["Django"]
+    assert experience.experience_skills.get().position == 0
+
+
+@pytest.mark.django_db
+def test_experience_skills_can_repeat_a_concept_across_experiences_and_profile() -> None:
+    account = verified_account("experience-skill-independence@example.com")
+    profile = create_profile(account)
+    first_experience = Experience.objects.create(
+        profile=profile,
+        role="Senior engineer",
+        organization="First Company",
+        start_date="2020-01-01",
+    )
+    second_experience = Experience.objects.create(
+        profile=profile,
+        role="Staff engineer",
+        organization="Second Company",
+        start_date="2023-01-01",
+    )
+    client = Client()
+    client.force_login(account)
+
+    client.post(
+        reverse("experience_skill_create", args=[first_experience.pk]),
+        {"label": "Python"},
+    )
+    client.post(
+        reverse("experience_skill_create", args=[second_experience.pk]),
+        {"label": "python"},
+    )
+    client.post(reverse("skill_create"), {"name": "PYTHON"})
+
+    concept = SkillConcept.objects.get(canonical_key="python")
+    profile_response = client.get(reverse("profile"))
+    assert ExperienceSkill.objects.filter(concept=concept).count() == 2
+    assert ProfileSkill.objects.get(profile=profile).concept_id == concept.pk
+    assert list(first_experience.experience_skills.values_list("label", flat=True)) == ["Python"]
+    assert list(second_experience.experience_skills.values_list("label", flat=True)) == ["python"]
+    assert profile_response.content.count(b">Python</span>") == 1
+    assert profile_response.content.count(b">python</span>") == 1
+    assert profile_response.content.count(b">PYTHON</span>") == 1
+
+
+@pytest.mark.django_db
+def test_experience_skill_mutations_cannot_cross_account_boundaries() -> None:
+    owner = verified_account("experience-skill-owner@example.com")
+    intruder = verified_account("experience-skill-intruder@example.com")
+    owner_profile = create_profile(owner)
+    create_profile(intruder)
+    experience = Experience.objects.create(
+        profile=owner_profile,
+        role="Senior engineer",
+        organization="Private Company",
+        start_date="2020-01-01",
+    )
+    concept, _ = resolve_skill_label("Python")
+    experience_skill = ExperienceSkill.objects.create(
+        experience=experience,
+        concept=concept,
+        label="Python",
+        position=0,
+    )
+    client = Client()
+    client.force_login(intruder)
+
+    requests = [
+        (reverse("experience_skill_create", args=[experience.pk]), {"label": "Django"}),
+        (reverse("experience_skill_delete", args=[experience_skill.pk]), {}),
+        (
+            reverse("experience_skill_reorder", args=[experience_skill.pk]),
+            {"direction": "up"},
+        ),
+    ]
+    for url, data in requests:
+        response = client.post(url, data)
+        assert response.status_code == 404
+
+    assert ExperienceSkill.objects.get(pk=experience_skill.pk).label == "Python"
+
+
+@pytest.mark.django_db
+def test_deleting_an_experience_or_account_removes_private_experience_skills_only() -> None:
+    account = verified_account("experience-skill-delete-experience@example.com")
+    profile = create_profile(account)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Disposable role",
+        organization="Private Company",
+        start_date="2020-01-01",
+    )
+    concept, _ = resolve_skill_label("Python")
+    alias = SkillAlias.objects.create(concept=concept, display_name="py")
+    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(reverse("experience_delete", args=[experience.pk]))
+
+    assert response.url == reverse("profile")
+    assert not ExperienceSkill.objects.filter(experience=experience).exists()
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
+
+    account_to_delete = verified_account("experience-skill-delete-account@example.com")
+    second_profile = create_profile(account_to_delete)
+    second_experience = Experience.objects.create(
+        profile=second_profile,
+        role="Account role",
+        organization="Private Company",
+        start_date="2020-01-01",
+    )
+    ExperienceSkill.objects.create(experience=second_experience, concept=concept, label="Python")
+
+    deletion_client = Client()
+    deletion_client.force_login(account_to_delete)
+    deletion_response = deletion_client.post(reverse("account_delete"), {"confirm": "1"})
+
+    assert deletion_response.url == reverse("home")
+    assert not ExperienceSkill.objects.filter(experience=second_experience).exists()
+    assert SkillConcept.objects.filter(pk=concept.pk).exists()
+    assert SkillAlias.objects.filter(pk=alias.pk, concept=concept).exists()
 
 
 @pytest.mark.django_db

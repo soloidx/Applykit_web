@@ -14,6 +14,7 @@ from apps.profiles.forms import (
     CandidateProfileForm,
     EducationForm,
     ExperienceForm,
+    ExperienceSkillForm,
     HighlightForm,
     LanguageForm,
     ProjectForm,
@@ -24,6 +25,7 @@ from apps.profiles.models import (
     CandidateProfile,
     Education,
     Experience,
+    ExperienceSkill,
     Highlight,
     Language,
     ProfileSkill,
@@ -42,6 +44,8 @@ def _profile_context(
     *,
     experience_form: ExperienceForm | None = None,
     experience_form_action: str | None = None,
+    experience_skill_form: ExperienceSkillForm | None = None,
+    experience_skill_experience: Experience | None = None,
     highlight_form: HighlightForm | None = None,
     highlight_experience: Experience | None = None,
     highlight_form_action: str | None = None,
@@ -58,9 +62,16 @@ def _profile_context(
 ) -> dict[str, object]:
     return {
         "candidate_profile": candidate_profile,
-        "experiences": candidate_profile.experiences.prefetch_related("highlights"),
+        "experiences": candidate_profile.experiences.prefetch_related(
+            "highlights", "experience_skills"
+        ),
         "experience_form": experience_form if experience_form is not None else ExperienceForm(),
         "experience_form_action": experience_form_action or reverse("experience_create"),
+        "experience_skill_form": experience_skill_form
+        if experience_skill_form is not None
+        else ExperienceSkillForm(),
+        "experience_skill_experience": experience_skill_experience,
+        "experience": experience_skill_experience,
         "highlight_form": highlight_form,
         "highlight_experience": highlight_experience,
         "highlight_form_action": highlight_form_action,
@@ -102,6 +113,14 @@ def _highlight_for_account(
     experience = _experience_for_account(account, experience_id)
     highlight = get_object_or_404(Highlight, pk=highlight_id, experience=experience)
     return experience, highlight
+
+
+def _experience_skill_for_account(account: Account, experience_skill_id: int) -> ExperienceSkill:
+    return get_object_or_404(
+        ExperienceSkill,
+        pk=experience_skill_id,
+        experience__profile__account=account,
+    )
 
 
 def _education_for_account(account: Account, education_id: int) -> Education:
@@ -146,6 +165,14 @@ def _normalize_highlight_positions(experience: Experience) -> None:
     for position, highlight in enumerate(experience.highlights.order_by("position", "id")):
         if highlight.position != position:
             Highlight.objects.filter(pk=highlight.pk).update(position=position)
+
+
+def _normalize_experience_skill_positions(experience: Experience) -> None:
+    for position, experience_skill in enumerate(
+        experience.experience_skills.order_by("position", "id")
+    ):
+        if experience_skill.position != position:
+            ExperienceSkill.objects.filter(pk=experience_skill.pk).update(position=position)
 
 
 def _normalize_education_positions(profile: CandidateProfile) -> None:
@@ -294,6 +321,86 @@ def experience_reorder(request: HttpRequest, experience_id: int) -> HttpResponse
             )
             for position, item in enumerate(experiences):
                 Experience.objects.filter(pk=item.pk).update(position=position)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def experience_skill_create(request: HttpRequest, experience_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    experience = _experience_for_account(account, experience_id)
+    form = ExperienceSkillForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            with transaction.atomic():
+                locked_experience = Experience.objects.select_for_update().get(pk=experience.pk)
+                entered_label = form.cleaned_data["label"]
+                concept, _ = resolve_skill_label(entered_label)
+                if ExperienceSkill.objects.filter(
+                    experience=locked_experience,
+                    concept=concept,
+                ).exists():
+                    form.add_error("label", "This skill is already used in this experience.")
+                else:
+                    ExperienceSkill.objects.create(
+                        experience=locked_experience,
+                        concept=concept,
+                        label=entered_label,
+                        position=locked_experience.experience_skills.count(),
+                    )
+        except IntegrityError:
+            form.add_error("label", "This skill is already used in this experience.")
+        if not form.errors:
+            return _redirect_or_htmx_redirect(request)
+
+    context = _profile_context(
+        experience.profile,
+        experience_skill_form=form,
+        experience_skill_experience=experience,
+    )
+    if _is_htmx(request):
+        return render(request, "profiles/_experience_skill_form.html", context)
+    context["form"] = CandidateProfileForm(instance=experience.profile)
+    return render(request, "profiles/profile.html", context)
+
+
+@login_required
+@verified_account_required
+def experience_skill_delete(request: HttpRequest, experience_skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    experience_skill = _experience_skill_for_account(account, experience_skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    with transaction.atomic():
+        experience = Experience.objects.select_for_update().get(pk=experience_skill.experience_id)
+        experience_skill.delete()
+        _normalize_experience_skill_positions(experience)
+    return _redirect_or_htmx_redirect(request)
+
+
+@login_required
+@verified_account_required
+def experience_skill_reorder(request: HttpRequest, experience_skill_id: int) -> HttpResponse:
+    account = cast(Account, request.user)
+    experience_skill = _experience_skill_for_account(account, experience_skill_id)
+    if request.method != "POST":
+        return HttpResponse(status=405)
+    direction = request.POST.get("direction")
+    if direction not in {"up", "down"}:
+        return HttpResponse("Direction must be up or down.", status=400)
+
+    with transaction.atomic():
+        experience = Experience.objects.select_for_update().get(pk=experience_skill.experience_id)
+        experience_skills = list(experience.experience_skills.order_by("position", "id"))
+        index = experience_skills.index(experience_skill)
+        swap_index = index - 1 if direction == "up" else index + 1
+        if 0 <= swap_index < len(experience_skills):
+            experience_skills[index], experience_skills[swap_index] = (
+                experience_skills[swap_index],
+                experience_skills[index],
+            )
+            for position, item in enumerate(experience_skills):
+                ExperienceSkill.objects.filter(pk=item.pk).update(position=position)
     return _redirect_or_htmx_redirect(request)
 
 

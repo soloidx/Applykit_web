@@ -86,6 +86,52 @@ class Experience(models.Model):
         super().save(*args, **kwargs)
 
 
+class ExperienceSkill(models.Model):
+    experience = models.ForeignKey(
+        Experience,
+        on_delete=models.CASCADE,
+        related_name="experience_skills",
+    )
+    concept = models.ForeignKey(
+        SkillConcept,
+        on_delete=models.PROTECT,
+        related_name="experience_skills",
+    )
+    label = models.CharField(max_length=200)
+    normalized_label = models.CharField(max_length=200, editable=False)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["experience", "concept"],
+                name="experience_skill_unique_concept",
+            ),
+            models.CheckConstraint(
+                condition=~Q(normalized_label=""),
+                name="experience_skill_label_not_blank",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.label
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.label = self.label.strip()
+        self.normalized_label = normalize_skill_label(self.label)
+        if not self.normalized_label:
+            raise ValidationError("Enter a hard-skill label.")
+        if self._state.adding and self.position == 0:
+            last_experience_skill = (
+                ExperienceSkill.objects.filter(experience=self.experience)
+                .order_by("-position", "-id")
+                .first()
+            )
+            self.position = last_experience_skill.position + 1 if last_experience_skill else 0
+        super().save(*args, **kwargs)
+
+
 class Highlight(models.Model):
     experience = models.ForeignKey(
         Experience,

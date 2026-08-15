@@ -130,6 +130,24 @@ class ExperienceForm(forms.ModelForm):
             )
 
 
+class ExperienceSkillForm(forms.Form):
+    label = forms.CharField(max_length=200, strip=False, label="Hard skill")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["label"].widget.attrs["class"] = (
+            "mt-2 block w-full rounded-2xl border border-ink/15 bg-sand px-4 py-3 "
+            "text-ink outline-none transition placeholder:text-ink/35 "
+            "focus:border-coral focus:ring-2 focus:ring-coral/20"
+        )
+
+    def clean_label(self) -> str:
+        label = self.cleaned_data["label"].strip()
+        if not label:
+            raise forms.ValidationError("Enter a hard-skill label.")
+        return label
+
+
 class HighlightForm(forms.ModelForm):
     class Meta:
         model = Highlight

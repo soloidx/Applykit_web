@@ -57,6 +57,38 @@
         {% if experience.description %}<p class="mt-5 max-w-3xl whitespace-pre-line text-sm leading-7 text-ink/70">{{ experience.description }}</p>{% endif %}
         <div class="mt-7 border-t border-ink/10 pt-6">
           <div class="flex items-center justify-between gap-4">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/60">Experience skills</h4>
+            <span class="text-xs text-ink/50">Ordered evidence for this role</span>
+          </div>
+          <div class="mt-4">{% include "profiles/_experience_skill_form.html" with experience=experience experience_skill_form=experience_skill_form %}</div>
+          {% if experience.experience_skills.all %}
+          <ul class="mt-4 flex flex-wrap gap-3">
+            {% for experience_skill in experience.experience_skills.all %}
+            <li class="flex items-center gap-2 rounded-full border border-ink/10 bg-cream px-4 py-2 text-sm font-semibold">
+              <span>{{ experience_skill.label }}</span>
+              <form method="post" action="{% url 'experience_skill_delete' experience_skill.pk %}">
+                {% csrf_token %}
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ experience_skill.label }} from {{ experience.role }}">Remove</button>
+              </form>
+              <form method="post" action="{% url 'experience_skill_reorder' experience_skill.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="direction" value="up">
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.label }} up">&uarr;</button>
+              </form>
+              <form method="post" action="{% url 'experience_skill_reorder' experience_skill.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="direction" value="down">
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.label }} down">&darr;</button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="mt-4 text-sm text-ink/55">No experience skills yet.</p>
+          {% endif %}
+        </div>
+        <div class="mt-7 border-t border-ink/10 pt-6">
+          <div class="flex items-center justify-between gap-4">
             <h4 class="text-sm font-semibold uppercase tracking-[0.16em] text-ink/60">Achievement highlights</h4>
             <a class="text-sm font-semibold text-coral hover:text-ink" href="{% url 'highlight_create' experience.pk %}">Add highlight</a>
           </div>
