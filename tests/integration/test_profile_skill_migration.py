@@ -8,7 +8,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.django_db(transaction=True)
 def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_concepts() -> None:
     executor = MigrationExecutor(connection)
-    latest = [("profiles", "0009_profile_skill_contract")]
+    latest = [("profiles", "0011_remove_experienceskill_experience_skill_label_not_blank_and_more")]
     executor.migrate([("profiles", "0006_projectskill")])
 
     old_apps = executor.loader.project_state([("profiles", "0006_projectskill")]).apps
