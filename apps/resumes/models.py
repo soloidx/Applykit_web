@@ -134,6 +134,7 @@ class ResumeProject(models.Model):
         related_name="resume_projects",
     )
     included = models.BooleanField(default=True)
+    is_relevant = models.BooleanField(default=False)
     position = models.PositiveIntegerField(default=0)
     name_override = models.CharField(max_length=200, null=True, blank=True)
     description_override = models.TextField(null=True, blank=True)

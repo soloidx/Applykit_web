@@ -1,0 +1,12 @@
+{% load static %}
+{{ formset.management_form }}
+<section class="border-b border-ink/10 py-8" data-section-kind="{{ section_kind }}">
+  <div class="flex flex-wrap items-center justify-between gap-4"><div><h2 class="font-display text-2xl font-semibold">{{ title }}</h2><p class="mt-1 text-sm text-ink/55">Included records and explicit positions</p></div><button class="text-xs font-bold text-coral" type="button" data-action="reset-section">Reset section</button></div>
+  {{ formset.non_form_errors }}
+  <div class="mt-5 grid gap-5">{% for form in formset %}<article id="{{ item_anchor }}-{{ form.source_id.value }}" class="rounded-2xl border border-ink/10 bg-sand/40 p-4" data-formset="{{ formset_name }}" data-source-id="{{ form.source_id.value }}">
+    {{ form.source_id }}
+    <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">Source record {{ form.source_id.value }}</h3><p class="text-sm text-ink/55">Edit the linked Candidate Profile values below.</p></div><button class="text-xs font-bold text-coral" type="button" data-action="reset-item">Reset item</button></div>
+    <div class="mt-4 grid gap-3 sm:grid-cols-2">{% for field in form %}{% if field.name != "source_id" %}<div class="{% if field.name == "description_override" %}sm:col-span-2{% endif %}">{% if field.name == "included" %}<label class="flex items-center gap-2 text-sm font-semibold">{{ field }} Include in Resume</label>{% elif field.name == "position" %}<label class="text-xs font-semibold" for="{{ field.id_for_label }}">Position</label>{{ field }}{% elif "inherit" in field.name %}<div class="mt-1 flex items-center gap-2 text-xs text-ink/55">{{ field }}<label for="{{ field.id_for_label }}">Inherit current Profile</label><button class="text-coral" type="button" data-action="reset-field" data-field="{{ field.name|slice:":-8" }}">Reset</button></div>{% else %}<label class="text-xs font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}{% endif %}</div>{% endif %}{% endfor %}</div>
+    {{ form.errors }}
+  </article>{% empty %}<p class="rounded-xl border border-dashed border-ink/15 p-4 text-sm text-ink/55">No {{ title }} records are available.</p>{% endfor %}</div>
+</section>

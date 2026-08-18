@@ -22,7 +22,7 @@ from apps.profiles.models import (
     ProjectSkill,
 )
 from apps.profiles.services import create_experience_skill, delete_experience_skill
-from apps.resumes.forms import build_resume_forms
+from apps.resumes.forms import ResumeDraftForms, build_resume_forms
 from apps.resumes.models import (
     Resume,
     ResumeEducation,
@@ -33,7 +33,7 @@ from apps.resumes.models import (
     ResumeSection,
     ResumeSkill,
 )
-from apps.resumes.services import open_resume
+from apps.resumes.services import build_resume_default_draft, open_resume
 from apps.skills.models import SkillConcept
 
 pytestmark = pytest.mark.integration
@@ -114,8 +114,11 @@ def resume_for(account: Account) -> Resume:
     return Resume.objects.create(application=application_for(account))
 
 
-def modern_resume_post(resume: Resume) -> dict[str, object]:
-    draft_forms = build_resume_forms(resume=resume)
+def modern_resume_post(
+    resume: Resume, draft_forms: ResumeDraftForms | None = None
+) -> dict[str, object]:
+    if draft_forms is None:
+        draft_forms = build_resume_forms(resume=resume)
     data: dict[str, object] = {}
     for name, form in (("header", draft_forms.header),):
         for field_name, _field in form.fields.items():
@@ -475,6 +478,137 @@ def test_open_resume_initializes_sections_membership_and_deterministic_skills_on
     assert reopened_created is False
     assert reopened.pk == resume.pk
     assert reopened.sections.get(kind=ResumeSection.Kind.SKILLS).position == 99
+
+
+@pytest.mark.django_db
+def test_resume_default_draft_rebuilds_current_sources_and_requirement_relevance() -> None:
+    account = verified_candidate("resume-default-draft@example.com")
+    application = application_for(account)
+    profile = account.candidate_profile
+    required = SkillConcept.objects.create(canonical_name="Python")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=required,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Current role",
+        organization="Current company",
+        location="London",
+        start_date="2024-01-01",
+    )
+    ExperienceSkill.objects.create(experience=experience, concept=required, label="Python")
+    project = Project.objects.create(profile=profile, name="Current project")
+    ProjectSkill.objects.create(project=project, concept=required, label="Python")
+
+    draft = build_resume_default_draft(account=account, application_id=application.pk)
+
+    experience_row = next(row for row in draft["experiences"] if row["source_id"] == experience.pk)
+    project_row = next(row for row in draft["projects"] if row["source_id"] == project.pk)
+    assert experience_row["included"] is True
+    assert project_row["included"] is True
+    assert experience_row["position"] == 0
+    assert project_row["position"] == 0
+    assert draft["sections"] == [
+        {"kind": kind, "position": position}
+        for position, kind in enumerate(
+            (
+                ResumeSection.Kind.SUMMARY,
+                ResumeSection.Kind.SKILLS,
+                ResumeSection.Kind.EXPERIENCE,
+                ResumeSection.Kind.PROJECTS,
+                ResumeSection.Kind.EDUCATION,
+                ResumeSection.Kind.LANGUAGES,
+            )
+        )
+    ]
+
+
+@pytest.mark.django_db
+def test_resume_reset_has_no_javascript_confirmation_and_rebuilds_relevance_on_save() -> None:
+    account = verified_candidate("resume-reset-confirmation@example.com")
+    sources = profile_sources(account)
+    application = application_for(account)
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=sources["concept"],
+        label="Django",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+
+    confirmation = client.get(f"{reverse('resume_detail', args=[application.pk])}?reset=confirm")
+    assert confirmation.status_code == 200
+    assert b"Nothing is saved until you choose Save Resume" in confirmation.content
+    assert Resume.objects.get(pk=resume.pk).full_name_override is None
+
+    confirmed = client.get(f"{reverse('resume_detail', args=[application.pk])}?reset=confirmed")
+    assert confirmed.status_code == 200
+    assert b'name="reset_resume_draft" value="1"' in confirmed.content
+
+    application.skill_requirements.all().delete()
+    default_forms = build_resume_forms(
+        resume=resume,
+        default_draft=build_resume_default_draft(
+            account=account,
+            application_id=application.pk,
+        ),
+    )
+    payload = modern_resume_post(resume, default_forms)
+    payload["reset_resume_draft"] = "1"
+    payload["reset_scope"] = "all"
+    response = client.post(reverse("resume_save", args=[application.pk]), payload)
+
+    assert response.status_code == 302
+    assert resume.experiences.get(experience=sources["experience"]).is_relevant is False
+    assert resume.projects.get(project=sources["project"]).is_relevant is False
+
+
+@pytest.mark.django_db
+def test_removed_resume_item_readds_from_current_profile_without_stale_tailoring() -> None:
+    account = verified_candidate("resume-readd-current-source@example.com")
+    sources = profile_sources(account)
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+
+    payload = modern_resume_post(resume)
+    experience_index = next(
+        index
+        for index, form in enumerate(build_resume_forms(resume=resume).experiences.forms)
+        if form.initial["source_id"] == sources["experience"].pk
+    )
+    payload[f"experiences-{experience_index}-included"] = ""
+    payload[f"experiences-{experience_index}-role_override"] = "Tailored before hiding"
+    payload.pop(f"experiences-{experience_index}-role_override_inherit", None)
+    payload["highlights-0-included"] = ""
+    payload["highlights-0-text_override"] = "Tailored highlight before hiding"
+    payload.pop("highlights-0-text_override_inherit", None)
+    assert client.post(reverse("resume_save", args=[application.pk]), payload).status_code == 302
+
+    sources["experience"].role = "Current role after removal"
+    sources["experience"].save(update_fields=["role"])
+    payload = modern_resume_post(Resume.objects.get(pk=resume.pk))
+    experience_index = next(
+        index
+        for index, form in enumerate(build_resume_forms(resume=resume).experiences.forms)
+        if form.initial["source_id"] == sources["experience"].pk
+    )
+    payload[f"experiences-{experience_index}-included"] = "on"
+    assert client.post(reverse("resume_save", args=[application.pk]), payload).status_code == 302
+
+    resume.refresh_from_db()
+    overlay = resume.experiences.get(experience=sources["experience"])
+    assert overlay.role_override is None
+    assert overlay.included is True
+    document = client.get(reverse("resume_detail", args=[application.pk]))
+    assert b"Current role after removal" in document.content
+    assert b"Tailored before hiding" not in document.content
 
 
 @pytest.mark.django_db

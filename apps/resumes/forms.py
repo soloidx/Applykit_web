@@ -450,7 +450,9 @@ def _item_initial(item: Any, source: Any, fields: tuple[str, ...]) -> dict[str, 
     return initial
 
 
-def build_resume_forms(*, resume: Resume, data: Any = None) -> ResumeDraftForms:
+def build_resume_forms(
+    *, resume: Resume, data: Any = None, default_draft: dict[str, Any] | None = None
+) -> ResumeDraftForms:
     profile = CandidateProfile.objects.get(account=resume.application.account)
     experience_overlays = {item.experience_id: item for item in resume.experiences.all()}
     project_overlays = {item.project_id: item for item in resume.projects.all()}
@@ -592,13 +594,51 @@ def build_resume_forms(*, resume: Resume, data: Any = None) -> ResumeDraftForms:
         header_initial[field] = _effective_initial(override, getattr(profile, field))
         header_initial[f"{field}_inherit"] = override is None
 
+    if default_draft is not None:
+        header_initial.update(default_draft["header"])
+        for field in default_draft["header"]:
+            header_initial[f"{field}_inherit"] = True
+        section_initial = default_draft["sections"]
+        defaults_by_set = {
+            "experiences": default_draft["experiences"],
+            "projects": default_draft["projects"],
+            "educations": default_draft["educations"],
+            "languages": default_draft["languages"],
+            "skills": default_draft["skills"],
+        }
+        initial_by_set = {
+            "experiences": initial_experiences,
+            "projects": initial_projects,
+            "educations": initial_educations,
+            "languages": initial_languages,
+            "skills": initial_skills,
+        }
+        for name, rows in initial_by_set.items():
+            rows_by_id = {row["source_id"]: row for row in defaults_by_set[name]}
+            for row in rows:
+                default_row = rows_by_id.get(row["source_id"])
+                if default_row is None:
+                    continue
+                row.update(default_row)
+                for field in default_row:
+                    if field.endswith("_override"):
+                        row[f"{field}_inherit"] = True
+        default_highlights = {
+            (row["experience_id"], row["source_id"]): row for row in default_draft["highlights"]
+        }
+        for row in initial_highlights:
+            default_row = default_highlights.get((row["experience_id"], row["source_id"]))
+            if default_row is not None:
+                row.update(default_row)
+                row["text_override_inherit"] = True
+    else:
+        section_initial = list(resume.sections.values("kind", "position"))
+
     return ResumeDraftForms(
         header=ResumeHeaderForm(data, prefix="header")
         if data is not None
         else ResumeHeaderForm(prefix="header", initial=header_initial),
-        sections=ResumeSectionFormSet(
-            data, prefix="sections", initial=list(resume.sections.values("kind", "position"))
-        ),
+        sections=ResumeSectionFormSet(data, prefix="sections", initial=section_initial),
         experiences=ResumeExperienceFormSet(
             data, prefix="experiences", initial=initial_experiences
         ),

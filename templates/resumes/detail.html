@@ -1,68 +1,273 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Resume | {{ application.role_title }} | ApplyKit{% endblock %}
 
 {% block content %}
-<section class="mx-auto max-w-5xl px-6 py-12 sm:py-20">
-  <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_detail' application.pk %}">Back to application</a>
-  <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-    <article class="rounded-[2rem] bg-white p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-12" aria-label="Resume document">
-      <header class="border-b border-ink/10 pb-8">
-        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-coral">Resume</p>
-        <h1 class="mt-3 font-display text-5xl font-semibold tracking-tight">{{ document.header.full_name }}</h1>
-        {% if document.header.professional_title %}<p class="mt-2 text-lg text-ink/70">{{ document.header.professional_title }}</p>{% endif %}
-        <div class="mt-5 grid gap-1 text-sm text-ink/65 sm:grid-cols-2">
-          {% if document.header.contact_email %}<p>{{ document.header.contact_email }}</p>{% endif %}
-          {% if document.header.phone_number %}<p>{{ document.header.phone_number }}</p>{% endif %}
-          {% if document.header.location %}<p>{{ document.header.location }}</p>{% endif %}
-          {% if document.header.linkedin_url %}<p><a class="text-coral" href="{{ document.header.linkedin_url }}">LinkedIn</a></p>{% endif %}
-          {% if document.header.portfolio_url %}<p><a class="text-coral" href="{{ document.header.portfolio_url }}">Portfolio</a></p>{% endif %}
+<div class="min-h-screen pb-20" data-resume-workbench>
+  <header class="border-b border-ink/10 bg-cream/80">
+    <div class="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_detail' application.pk %}" data-action="back">Back to application</a>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <h1 class="font-display text-3xl font-semibold sm:text-4xl">Tailor Resume</h1>
+          <span class="rounded-full bg-mint/50 px-3 py-1 text-xs font-bold uppercase tracking-wider">Source-backed</span>
         </div>
-      </header>
+        <p class="mt-2 text-sm text-ink/60">{{ application.company.name }} · Changes stay local until Save Resume.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if reset_pending or save_failed %}Unsaved changes{% else %}Saved{% endif %}</p>
+        <a class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold hover:border-coral hover:text-coral" href="{% url 'resume_detail' application.pk %}?reset=confirm" data-action="reset-resume">Reset Resume</a>
+        <button class="rounded-full bg-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink" type="submit" form="resume-form">Save Resume</button>
+      </div>
+    </div>
+  </header>
 
-      {% for section in document.sections %}
-      {% if section.kind == "summary" and document.header.professional_summary %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Summary</h2><p class="mt-3 whitespace-pre-line text-ink/75">{{ document.header.professional_summary }}</p></section>{% endif %}
-      {% if section.kind == "skills" and document.skills %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Skills</h2><ul class="mt-3 flex flex-wrap gap-2">{% for skill in document.skills %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ skill.label }}</li>{% endfor %}</ul></section>{% endif %}
-      {% if section.kind == "experience" and document.experiences %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Experience</h2><div class="mt-4 grid gap-6">{% for experience in document.experiences %}<article><h3 class="font-semibold">{{ experience.role }} · {{ experience.organization }}</h3><p class="text-sm text-ink/60">{{ experience.location }} · {{ experience.start_date }}{% if experience.end_date %} - {{ experience.end_date }}{% endif %}</p>{% if experience.description %}<p class="mt-2 whitespace-pre-line text-ink/75">{{ experience.description }}</p>{% endif %}{% if experience.highlights %}<ul class="mt-2 list-disc space-y-1 pl-5 text-ink/75">{% for highlight in experience.highlights %}<li>{{ highlight.text }}</li>{% endfor %}</ul>{% endif %}</article>{% endfor %}</div></section>{% endif %}
-      {% if section.kind == "projects" and document.projects %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Projects</h2><div class="mt-4 grid gap-5">{% for project in document.projects %}<article><h3 class="font-semibold">{{ project.name }}</h3><p class="mt-1 whitespace-pre-line text-ink/75">{{ project.description }}</p>{% if project.url %}<a class="text-sm text-coral" href="{{ project.url }}">Project link</a>{% endif %}</article>{% endfor %}</div></section>{% endif %}
-      {% if section.kind == "education" and document.educations %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Education</h2><ul class="mt-4 grid gap-3">{% for education in document.educations %}<li><strong>{{ education.degree }}</strong> · {{ education.institution }} · {{ education.start_date }}{% if education.end_date %} - {{ education.end_date }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
-      {% if section.kind == "languages" and document.languages %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Languages</h2><ul class="mt-4 flex flex-wrap gap-2">{% for language in document.languages %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ language.name }}{% if language.proficiency %} ({{ language.proficiency }}){% endif %}</li>{% endfor %}</ul></section>{% endif %}
-      {% endfor %}
-    </article>
-
-    <aside class="h-fit rounded-[2rem] border border-ink/10 bg-cream p-6">
-      <h2 class="font-display text-2xl font-semibold">Tailor resume</h2>
-      <p class="mt-2 text-sm text-ink/65">Blank override fields inherit the current Candidate Profile.</p>
-        <form class="mt-6 grid gap-4" method="post" action="{% url 'resume_save' application.pk %}">
-          {% csrf_token %}
-          {% if draft_forms %}
-          {{ draft_forms.header.non_field_errors }}
-          {% for field in draft_forms.header %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
-          {{ draft_forms.sections.management_form }}
-          {{ draft_forms.sections.non_form_errors }}
-          {% for form in draft_forms.sections %}{% for field in form %}{{ field }}{{ field.errors }}{% endfor %}{% endfor %}
-          {{ draft_forms.experiences.management_form }}
-          {{ draft_forms.experiences.non_form_errors }}
-          {% for form in draft_forms.experiences %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
-          {{ draft_forms.highlights.management_form }}
-          {{ draft_forms.highlights.non_form_errors }}
-          {% for form in draft_forms.highlights %}{% for field in form %}{{ field }}{{ field.errors }}{% endfor %}{% endfor %}
-          {{ draft_forms.projects.management_form }}
-          {{ draft_forms.projects.non_form_errors }}
-          {% for form in draft_forms.projects %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
-          {{ draft_forms.educations.management_form }}
-          {{ draft_forms.educations.non_form_errors }}
-          {% for form in draft_forms.educations %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
-          {{ draft_forms.languages.management_form }}
-          {{ draft_forms.languages.non_form_errors }}
-          {% for form in draft_forms.languages %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
-          {{ draft_forms.skills.management_form }}
-          {{ draft_forms.skills.non_form_errors }}
-          {% for form in draft_forms.skills %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
-          {% endif %}
-          <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">Save Resume</button>
-        </form>
+  <main class="mx-auto grid max-w-7xl gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[20rem_minmax(0,1fr)]">
+    <aside class="h-fit space-y-5 rounded-3xl bg-ink p-5 text-white lg:sticky lg:top-6">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-wider text-yellow">Candidate Profile source</p>
+        <p class="mt-2 text-sm text-white/60">Included records remain linked to the current Profile. Use the native Include controls in the document.</p>
+      </div>
+      <details open>
+        <summary class="cursor-pointer font-display text-xl font-semibold">Experience</summary>
+        <div class="mt-3 space-y-2">
+          {% for form in draft_forms.experiences %}
+          <a class="block rounded-xl bg-white/10 p-3 transition hover:bg-white/15" href="#experience-{{ form.source_id.value }}">
+            <div class="flex items-start justify-between gap-2">
+              <div><p class="text-sm font-semibold">{{ form.role_override.value }}</p><p class="text-xs text-white/50">{{ form.organization_override.value }}</p></div>
+              {% if form.source_id.value in default_draft.relevant_experience_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
+            </div>
+            <p class="mt-2 text-xs text-white/55">{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
+          </a>
+          {% empty %}<p class="text-sm text-white/50">No Experience records.</p>{% endfor %}
+        </div>
+      </details>
+      <details>
+        <summary class="cursor-pointer font-display text-xl font-semibold">Projects</summary>
+        <div class="mt-3 space-y-2">
+          {% for form in draft_forms.projects %}
+          <a class="block rounded-xl bg-white/10 p-3 transition hover:bg-white/15" href="#project-{{ form.source_id.value }}">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-sm font-semibold">{{ form.name_override.value }}</p>
+              {% if form.source_id.value in default_draft.relevant_project_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
+            </div>
+            <p class="mt-2 text-xs text-white/55">{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
+          </a>
+          {% empty %}<p class="text-sm text-white/50">No Project records.</p>{% endfor %}
+        </div>
+      </details>
+      <details>
+        <summary class="cursor-pointer font-display text-xl font-semibold">Inherited content</summary>
+        <p class="mt-3 rounded-xl border border-dashed border-white/20 p-3 text-xs leading-5 text-white/55">Edit a field to tailor it for this application. Blank values reset that field to the current Profile.</p>
+      </details>
     </aside>
-  </div>
-</section>
+
+    <form id="resume-form" class="min-w-0 rounded-[2rem] border border-ink/10 bg-white p-5 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-8 lg:p-10" method="post" action="{% url 'resume_save' application.pk %}" data-dirty="{% if reset_pending or save_failed %}true{% else %}false{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="reset_resume_draft" value="{% if reset_pending %}1{% else %}0{% endif %}" data-reset-flag>
+      <input type="hidden" name="reset_scope" value="{% if reset_pending %}all{% endif %}" data-reset-scope>
+      {% if save_failed %}<div class="mb-5 rounded-xl bg-coral/10 p-4 text-sm" role="alert">Save failed. Your complete draft is preserved for correction or retry.</div>{% endif %}
+      <article class="border-b border-ink/10 pb-8" aria-label="Resume document">
+        <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral">Resume document</p>
+        <h2 class="mt-2 font-display text-4xl font-semibold">{{ document.header.full_name }}</h2>
+        {% if document.header.professional_title %}<p class="mt-1 text-lg text-ink/65">{{ document.header.professional_title }}</p>{% endif %}
+        <div class="mt-4 flex flex-wrap gap-2 text-sm text-ink/60">{% if document.header.contact_email %}<span>{{ document.header.contact_email }}</span>{% endif %}{% if document.header.location %}<span>{{ document.header.location }}</span>{% endif %}{% if document.header.linkedin_url %}<span>LinkedIn</span>{% endif %}</div>
+        {% for section in document.sections %}
+        {% if section.kind == "summary" and document.header.professional_summary %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Summary</h3><p class="mt-2 whitespace-pre-line text-sm leading-6 text-ink/70">{{ document.header.professional_summary }}</p></section>{% endif %}
+        {% if section.kind == "skills" and document.skills %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Skills</h3><ul class="mt-3 flex flex-wrap gap-2">{% for skill in document.skills %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ skill.label }}</li>{% endfor %}</ul></section>{% endif %}
+        {% if section.kind == "experience" and document.experiences %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Experience</h3><div class="mt-3 grid gap-4">{% for experience in document.experiences %}<article class="rounded-xl border-l-2 {% if experience.is_relevant %}border-coral{% else %}border-ink/15{% endif %} pl-4"><div class="flex flex-wrap items-center gap-2"><h4 class="font-semibold">{{ experience.role }} · {{ experience.organization }}</h4>{% if experience.is_relevant %}<span class="text-[0.65rem] font-bold uppercase text-coral">Relevant</span>{% endif %}<span class="text-[0.65rem] font-bold uppercase text-ink/40">{% if experience.tailored %}Tailored{% else %}Inherited{% endif %}</span></div><p class="text-xs text-ink/50">{{ experience.location }} · {{ experience.start_date }}{% if experience.end_date %} - {{ experience.end_date }}{% endif %}</p>{% if experience.description %}<p class="mt-2 whitespace-pre-line text-sm text-ink/70">{{ experience.description }}</p>{% endif %}{% if experience.highlights %}<ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-ink/70">{% for highlight in experience.highlights %}<li>{% if highlight.tailored %}<span class="text-[0.65rem] font-bold uppercase text-coral">Tailored</span> {% endif %}{{ highlight.text }}</li>{% endfor %}</ul>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+        {% if section.kind == "projects" and document.projects %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Projects</h3><div class="mt-3 grid gap-3 sm:grid-cols-2">{% for project in document.projects %}<article class="rounded-xl border p-3 {% if project.is_relevant %}border-coral/30{% else %}border-ink/10{% endif %}"><div class="flex flex-wrap items-center gap-2"><h4 class="font-semibold">{{ project.name }}</h4>{% if project.is_relevant %}<span class="text-[0.65rem] font-bold uppercase text-coral">Relevant</span>{% endif %}</div><p class="mt-1 text-sm text-ink/65">{{ project.description }}</p></article>{% endfor %}</div></section>{% endif %}
+        {% if section.kind == "education" and document.educations %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Education</h3><ul class="mt-3 grid gap-2 text-sm">{% for education in document.educations %}<li><strong>{{ education.degree }}</strong> · {{ education.institution }}</li>{% endfor %}</ul></section>{% endif %}
+        {% if section.kind == "languages" and document.languages %}<section class="mt-7"><h3 class="font-display text-xl font-semibold">Languages</h3><ul class="mt-3 flex flex-wrap gap-2">{% for language in document.languages %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ language.name }}{% if language.proficiency %} ({{ language.proficiency }}){% endif %}</li>{% endfor %}</ul></section>{% endif %}
+        {% endfor %}
+      </article>
+      {% if draft_forms.header.non_field_errors %}<div class="mb-5 rounded-xl bg-coral/10 p-4 text-sm" role="alert">{{ draft_forms.header.non_field_errors }}</div>{% endif %}
+
+      <section class="border-b border-ink/10 pb-8" data-section-kind="summary">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div><p class="text-xs font-bold uppercase tracking-[0.18em] text-coral">Identity</p><h2 class="mt-2 font-display text-4xl font-semibold">{{ document.header.full_name }}</h2><p class="mt-1 text-sm text-ink/60">Profile-backed contact details and summary</p></div>
+          <button class="text-xs font-bold text-coral" type="button" data-action="reset-section">Reset section</button>
+        </div>
+        <div class="mt-6 grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2"><label class="text-sm font-semibold" for="{{ draft_forms.header.professional_summary.id_for_label }}">{{ draft_forms.header.professional_summary.label }}</label>{{ draft_forms.header.professional_summary }}{{ draft_forms.header.professional_summary.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.professional_summary_inherit }}<label for="{{ draft_forms.header.professional_summary_inherit.id_for_label }}">Inherit current Profile</label><button class="text-coral" type="button" data-action="reset-field" data-field="professional_summary">Reset field</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.contact_email.id_for_label }}">{{ draft_forms.header.contact_email.label }}</label>{{ draft_forms.header.contact_email }}{{ draft_forms.header.contact_email.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.contact_email_inherit }}<label for="{{ draft_forms.header.contact_email_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="contact_email">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.full_name.id_for_label }}">{{ draft_forms.header.full_name.label }}</label>{{ draft_forms.header.full_name }}{{ draft_forms.header.full_name.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.full_name_inherit }}<label for="{{ draft_forms.header.full_name_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="full_name">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.professional_title.id_for_label }}">{{ draft_forms.header.professional_title.label }}</label>{{ draft_forms.header.professional_title }}{{ draft_forms.header.professional_title.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.professional_title_inherit }}<label for="{{ draft_forms.header.professional_title_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="professional_title">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.phone_number.id_for_label }}">{{ draft_forms.header.phone_number.label }}</label>{{ draft_forms.header.phone_number }}{{ draft_forms.header.phone_number.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.phone_number_inherit }}<label for="{{ draft_forms.header.phone_number_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="phone_number">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.location.id_for_label }}">{{ draft_forms.header.location.label }}</label>{{ draft_forms.header.location }}{{ draft_forms.header.location.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.location_inherit }}<label for="{{ draft_forms.header.location_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="location">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.linkedin_url.id_for_label }}">{{ draft_forms.header.linkedin_url.label }}</label>{{ draft_forms.header.linkedin_url }}{{ draft_forms.header.linkedin_url.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.linkedin_url_inherit }}<label for="{{ draft_forms.header.linkedin_url_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="linkedin_url">Reset</button></div></div>
+          <div><label class="text-sm font-semibold" for="{{ draft_forms.header.portfolio_url.id_for_label }}">{{ draft_forms.header.portfolio_url.label }}</label>{{ draft_forms.header.portfolio_url }}{{ draft_forms.header.portfolio_url.errors }}<div class="mt-1 flex items-center gap-3 text-xs text-ink/55">{{ draft_forms.header.portfolio_url_inherit }}<label for="{{ draft_forms.header.portfolio_url_inherit.id_for_label }}">Inherit</label><button type="button" class="text-coral" data-action="reset-field" data-field="portfolio_url">Reset</button></div></div>
+        </div>
+      </section>
+
+      {{ draft_forms.sections.management_form }}
+      <section class="border-b border-ink/10 py-8" data-section-kind="sections">
+        <div class="flex items-center justify-between gap-4"><h2 class="font-display text-2xl font-semibold">Resume sections</h2><p class="text-xs text-ink/50">Set explicit positions</p></div>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">{% for form in draft_forms.sections %}<div class="rounded-xl bg-sand/60 p-3" data-section-row data-section-kind="{{ form.kind.value }}">{{ form.kind }}<label class="text-xs font-semibold" for="{{ form.position.id_for_label }}">{{ form.kind.value|capfirst }} position</label>{{ form.position }}{{ form.errors }}</div>{% endfor %}</div>
+        {{ draft_forms.sections.non_form_errors }}
+      </section>
+
+      {% include "resumes/_item_forms.html" with title="Experience" section_kind="experience" formset=draft_forms.experiences formset_name="experiences" item_anchor="experience" %}
+      {% include "resumes/_highlight_forms.html" with formset=draft_forms.highlights %}
+      {% include "resumes/_item_forms.html" with title="Projects" section_kind="projects" formset=draft_forms.projects formset_name="projects" item_anchor="project" %}
+      {% include "resumes/_item_forms.html" with title="Education" section_kind="education" formset=draft_forms.educations formset_name="educations" item_anchor="education" %}
+      {% include "resumes/_item_forms.html" with title="Languages" section_kind="languages" formset=draft_forms.languages formset_name="languages" item_anchor="language" %}
+      {% include "resumes/_item_forms.html" with title="Skills" section_kind="skills" formset=draft_forms.skills formset_name="skills" item_anchor="skill" %}
+
+      <div class="mt-8 flex items-center justify-between gap-4 border-t border-ink/10 pt-6"><p class="text-sm text-ink/55">Native fields remain available when JavaScript is disabled.</p><button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white hover:bg-ink" type="submit">Save Resume</button></div>
+    </form>
+  </main>
+
+  <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="reset-resume-title" data-reset-dialog>
+    <div class="p-6"><h2 id="reset-resume-title" class="font-display text-2xl font-semibold">Reset this Resume?</h2><p class="mt-3 text-sm leading-6 text-ink/70">This replaces the local draft with current Candidate Profile content and current job requirements. Tailoring, hidden records, and custom order will remain unchanged in the saved Resume until you choose Save Resume.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel">Cancel</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="confirm">Reset locally</button></form></div>
+  </dialog>
+  <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="discard-resume-title" data-exit-dialog>
+    <div class="p-6"><h2 id="discard-resume-title" class="font-display text-2xl font-semibold">Discard unsaved changes?</h2><p class="mt-3 text-sm leading-6 text-ink/70">Your local Resume draft has not been saved. Keep editing or discard these changes and leave the workbench.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel">Keep editing</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="confirm">Discard changes</button></form></div>
+  </dialog>
+  <noscript><p class="mx-auto max-w-7xl px-5 pb-8 text-sm text-ink/60 sm:px-8">Reset controls require JavaScript confirmation; native field, inclusion, ordering, and Save Resume controls remain available.</p></noscript>
+  {{ default_draft|json_script:"resume-default-draft" }}
+  {{ baseline_snapshot|json_script:"resume-baseline" }}
+</div>
+
+<script>
+(() => {
+  const root = document.querySelector("[data-resume-workbench]");
+  if (!root) return;
+  const form = root.querySelector("#resume-form");
+  const defaults = JSON.parse(document.getElementById("resume-default-draft").textContent);
+  const status = root.querySelector("[data-save-status]");
+  const sets = ["experiences", "projects", "educations", "languages", "skills"];
+  const input = (scope, name) => scope.querySelector(`[name="${name}"]`) || scope.querySelector(`[name$="-${name}"]`);
+  const setValue = (scope, name, value, inherit) => {
+    const field = input(scope, name);
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
+    const inheritField = input(scope, `${name}_inherit`);
+    if (inheritField) inheritField.checked = inherit;
+  };
+  const applyRow = (scope, row, preserveStructure) => {
+    const included = input(scope, "included");
+    const position = input(scope, "position");
+    const oldIncluded = included && included.checked;
+    const oldPosition = position && position.value;
+    Object.entries(row).forEach(([name, value]) => {
+      if (["source_id", "experience_id", "included", "position"].includes(name)) return;
+      setValue(scope, name, value, true);
+    });
+    if (!preserveStructure) {
+      setValue(scope, "included", true, false);
+      setValue(scope, "position", row.position, false);
+    } else {
+      setValue(scope, "included", oldIncluded, false);
+      setValue(scope, "position", oldPosition, false);
+    }
+  };
+  const defaultRow = (name, sourceId, experienceId) => defaults[name].find(row => String(row.source_id) === String(sourceId) && (!experienceId || String(row.experience_id) === String(experienceId)));
+  const resetField = (button) => {
+    const fieldName = button.dataset.field;
+    const scope = button.closest("[data-formset]") || form;
+    let value = defaults.header[fieldName];
+    if (scope !== form) {
+      const row = defaultRow(scope.dataset.formset, scope.dataset.sourceId, scope.dataset.experienceId);
+      value = row && row[fieldName];
+    }
+    setValue(scope, fieldName, value, true);
+    updateDirty();
+  };
+  const resetItem = (button) => {
+    const scope = button.closest("[data-formset]");
+    const row = defaultRow(scope.dataset.formset, scope.dataset.sourceId, scope.dataset.experienceId);
+    if (row) applyRow(scope, row, true);
+    if (scope.dataset.formset === "experiences") {
+      form.querySelectorAll(`[data-highlight-experience="${scope.dataset.sourceId}"]`).forEach(highlight => {
+        const highlightRow = defaults.highlights.find(item => String(item.experience_id) === scope.dataset.sourceId && String(item.source_id) === highlight.dataset.sourceId);
+        if (highlightRow) applyRow(highlight, highlightRow, false);
+      });
+    }
+    updateDirty();
+  };
+  const resetSection = (section) => {
+    const kind = section.dataset.sectionKind;
+    if (kind === "experience" || kind === "projects") input(form, "reset_scope").value = kind;
+    if (kind === "summary") Object.entries(defaults.header).forEach(([name, value]) => setValue(form, name, value, true));
+    const names = kind === "experience" ? ["experiences", "highlights"] : kind === "projects" ? ["projects"] : kind === "education" ? ["educations"] : kind === "languages" ? ["languages"] : kind === "skills" ? ["skills"] : [];
+    names.forEach(name => {
+      form.querySelectorAll(`[data-formset="${name}"]`).forEach(scope => {
+        const sourceId = scope.dataset.sourceId;
+        const row = name === "highlights" ? defaults.highlights.find(item => String(item.source_id) === sourceId && String(item.experience_id) === scope.dataset.experienceId) : defaultRow(name, sourceId);
+        if (row) applyRow(scope, row, false);
+      });
+    });
+    updateDirty();
+  };
+  const resetResume = () => {
+    input(form, "reset_resume_draft").value = "1";
+    input(form, "reset_scope").value = "all";
+    Object.entries(defaults.header).forEach(([name, value]) => setValue(form, name, value, true));
+    form.querySelectorAll("[data-section-row]").forEach(scope => {
+      const row = defaults.sections.find(item => item.kind === scope.dataset.sectionKind);
+      if (row) setValue(scope, "position", row.position, false);
+    });
+    sets.forEach(name => form.querySelectorAll(`[data-formset="${name}"]`).forEach(scope => {
+      const row = defaultRow(name, scope.dataset.sourceId);
+      if (row) applyRow(scope, row, false);
+    }));
+    form.querySelectorAll('[data-formset="highlights"]').forEach(scope => {
+      const row = defaults.highlights.find(item => String(item.source_id) === scope.dataset.sourceId && String(item.experience_id) === scope.dataset.experienceId);
+      if (row) applyRow(scope, row, false);
+    });
+    updateDirty();
+  };
+  root.addEventListener("click", event => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "reset-resume") {
+      event.preventDefault();
+      const dialog = root.querySelector("[data-reset-dialog]");
+      if (dialog.showModal) dialog.showModal(); else if (window.confirm("Reset this local Resume draft?")) resetResume();
+    }
+    if (button.dataset.action === "back" && form.dataset.dirty === "true") {
+      event.preventDefault();
+      const dialog = root.querySelector("[data-exit-dialog]");
+      dialog.dataset.href = button.href;
+      if (dialog.showModal) dialog.showModal(); else if (window.confirm("Discard unsaved Resume changes?")) window.location.assign(button.href);
+    }
+    if (button.dataset.action === "reset-field") resetField(button);
+    if (button.dataset.action === "reset-item") resetItem(button);
+    if (button.dataset.action === "reset-section") resetSection(button.closest("[data-section-kind]"));
+  });
+  root.querySelector("[data-reset-dialog]")?.addEventListener("close", event => {
+    if (event.target.returnValue === "confirm") resetResume();
+  });
+  root.querySelector("[data-exit-dialog]")?.addEventListener("close", event => {
+    if (event.target.returnValue === "confirm") window.location.assign(event.target.dataset.href);
+  });
+  const snapshot = () => [...form.elements]
+    .filter(control => control.name)
+    .map(control => `${control.name}=${control.type === "checkbox" ? (control.checked ? "1" : "0") : control.value}`)
+    .sort()
+    .join("&");
+  let baseline = JSON.parse(document.getElementById("resume-baseline").textContent);
+  const updateDirty = () => {
+    const dirty = snapshot() !== baseline;
+    form.dataset.dirty = String(dirty);
+    status.textContent = dirty ? "Unsaved changes" : "Saved";
+    status.classList.toggle("text-coral", dirty);
+  };
+  form.addEventListener("input", updateDirty);
+  form.addEventListener("change", updateDirty);
+  form.addEventListener("submit", event => {
+    if (form.dataset.saving === "true") { event.preventDefault(); return; }
+    form.dataset.saving = "true";
+    status.textContent = "Saving...";
+    status.classList.remove("text-coral");
+    setTimeout(() => form.querySelectorAll("button, input, textarea, select").forEach(control => { control.disabled = true; }), 0);
+  });
+  window.addEventListener("beforeunload", event => {
+    if (form.dataset.dirty === "true") { event.preventDefault(); event.returnValue = ""; }
+  });
+})();
+</script>
 {% endblock %}

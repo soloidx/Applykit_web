@@ -121,6 +121,150 @@ def _skill_initialization_order(
     )
 
 
+def _default_source_order(
+    application: JobApplication,
+    profile: CandidateProfile,
+) -> tuple[list[Experience], list[Project]]:
+    relevant_experience_ids, relevant_project_ids = _relevant_source_ids(application, profile)
+    experiences = list(profile.experiences.order_by("position", "id"))
+    experiences.sort(
+        key=lambda experience: (
+            experience.pk not in relevant_experience_ids,
+            experience.position,
+            experience.pk,
+        )
+    )
+
+    projects = list(profile.projects.order_by("position", "id"))
+    projects.sort(
+        key=lambda project: (project.pk not in relevant_project_ids, project.position, project.pk)
+    )
+    return experiences, projects
+
+
+def _relevant_source_ids(
+    application: JobApplication,
+    profile: CandidateProfile,
+) -> tuple[set[int], set[int]]:
+    requirements = set(application.skill_requirements.values_list("concept_id", flat=True))
+    relevant_experience_ids = set(
+        ExperienceSkill.objects.filter(
+            experience__profile=profile,
+            concept_id__in=requirements,
+        ).values_list("experience_id", flat=True)
+    )
+    relevant_project_ids = set(
+        ProjectSkill.objects.filter(
+            project__profile=profile,
+            concept_id__in=requirements,
+        ).values_list("project_id", flat=True)
+    )
+    return relevant_experience_ids, relevant_project_ids
+
+
+def build_resume_default_draft(*, account: Account, application_id: int) -> dict[str, Any]:
+    """Build the current source-backed draft used by initialization and local resets."""
+    application = JobApplication.objects.get(pk=application_id, account=account)
+    profile = CandidateProfile.objects.get(account=account)
+    experiences, projects = _default_source_order(application, profile)
+    relevant_experience_ids, relevant_project_ids = _relevant_source_ids(application, profile)
+
+    sections = [{"kind": kind, "position": position} for position, kind in enumerate(SECTION_ORDER)]
+    experience_rows = [
+        {
+            "source_id": experience.pk,
+            "included": True,
+            "position": position,
+            "role_override": experience.role,
+            "organization_override": experience.organization,
+            "location_override": experience.location,
+            "start_date_override": experience.start_date,
+            "end_date_override": experience.end_date,
+            "description_override": experience.description,
+        }
+        for position, experience in enumerate(experiences)
+    ]
+    project_rows = [
+        {
+            "source_id": project.pk,
+            "included": True,
+            "position": position,
+            "name_override": project.name,
+            "description_override": project.description,
+            "url_override": project.url,
+        }
+        for position, project in enumerate(projects)
+    ]
+    education_rows = [
+        {
+            "source_id": education.pk,
+            "included": True,
+            "position": position,
+            "institution_override": education.institution,
+            "degree_override": education.degree,
+            "start_date_override": education.start_date,
+            "end_date_override": education.end_date,
+        }
+        for position, education in enumerate(profile.educations.order_by("position", "id"))
+    ]
+    language_rows = [
+        {
+            "source_id": language.pk,
+            "included": True,
+            "position": position,
+            "name_override": language.name,
+            "proficiency_override": language.proficiency,
+        }
+        for position, language in enumerate(profile.languages.order_by("position", "id"))
+    ]
+    highlight_rows = [
+        {
+            "experience_id": experience.pk,
+            "source_id": highlight.pk,
+            "included": True,
+            "position": highlight.position,
+            "text_override": highlight.text,
+        }
+        for experience in profile.experiences.order_by("position", "id")
+        for highlight in experience.highlights.order_by("position", "id")
+    ]
+    labels = _labels_by_concept(profile)
+    concept_ids = _skill_initialization_order(application, profile)
+    skill_rows = [
+        {
+            "source_id": concept_id,
+            "included": True,
+            "position": position,
+            "label_override": labels.get(concept_id, ""),
+        }
+        for position, concept_id in enumerate(concept_ids)
+    ]
+    return {
+        "header": {
+            field: getattr(profile, field)
+            for field in (
+                "contact_email",
+                "full_name",
+                "professional_title",
+                "professional_summary",
+                "phone_number",
+                "location",
+                "linkedin_url",
+                "portfolio_url",
+            )
+        },
+        "sections": sections,
+        "experiences": experience_rows,
+        "highlights": highlight_rows,
+        "projects": project_rows,
+        "educations": education_rows,
+        "languages": language_rows,
+        "skills": skill_rows,
+        "relevant_experience_ids": sorted(relevant_experience_ids),
+        "relevant_project_ids": sorted(relevant_project_ids),
+    }
+
+
 def _initialize_resume(
     resume: Resume,
     application: JobApplication,
@@ -133,21 +277,8 @@ def _initialize_resume(
         ]
     )
 
-    requirements = set(application.skill_requirements.values_list("concept_id", flat=True))
-    relevant_experience_ids = set(
-        ExperienceSkill.objects.filter(
-            experience__profile=profile,
-            concept_id__in=requirements,
-        ).values_list("experience_id", flat=True)
-    )
-    experiences = list(profile.experiences.order_by("position", "id"))
-    experiences.sort(
-        key=lambda experience: (
-            experience.pk not in relevant_experience_ids,
-            experience.position,
-            experience.pk,
-        )
-    )
+    experiences, projects = _default_source_order(application, profile)
+    relevant_experience_ids, relevant_project_ids = _relevant_source_ids(application, profile)
     ResumeExperience.objects.bulk_create(
         [
             ResumeExperience(
@@ -161,22 +292,13 @@ def _initialize_resume(
         ]
     )
 
-    relevant_project_ids = set(
-        ProjectSkill.objects.filter(
-            project__profile=profile,
-            concept_id__in=requirements,
-        ).values_list("project_id", flat=True)
-    )
-    projects = list(profile.projects.order_by("position", "id"))
-    projects.sort(
-        key=lambda project: (project.pk not in relevant_project_ids, project.position, project.pk)
-    )
     ResumeProject.objects.bulk_create(
         [
             ResumeProject(
                 resume=resume,
                 project=project,
                 included=True,
+                is_relevant=project.pk in relevant_project_ids,
                 position=position,
             )
             for position, project in enumerate(projects)
@@ -254,6 +376,7 @@ def _render_experiences(resume: Resume, profile: CandidateProfile) -> tuple[dict
                 {
                     "source": highlight,
                     "text": _effective(child.text_override if child else None, highlight.text),
+                    "tailored": child is not None and child.text_override is not None,
                     "position": child.position
                     if child and child.position is not None
                     else highlight.position,
@@ -272,6 +395,17 @@ def _render_experiences(resume: Resume, profile: CandidateProfile) -> tuple[dict
                 "start_date": _effective(overlay.start_date_override, source.start_date),
                 "end_date": _effective(overlay.end_date_override, source.end_date),
                 "description": _effective(overlay.description_override, source.description),
+                "tailored": any(
+                    getattr(overlay, field) is not None
+                    for field in (
+                        "role_override",
+                        "organization_override",
+                        "location_override",
+                        "start_date_override",
+                        "end_date_override",
+                        "description_override",
+                    )
+                ),
                 "highlights": highlights,
             }
         )
@@ -302,10 +436,15 @@ def build_resume_document(*, account: Account, resume: Resume) -> ResumeDocument
         {
             "source": overlay.project,
             "included": overlay.included,
+            "is_relevant": overlay.is_relevant,
             "position": overlay.position,
             "name": _effective(overlay.name_override, overlay.project.name),
             "description": _effective(overlay.description_override, overlay.project.description),
             "url": _effective(overlay.url_override, overlay.project.url),
+            "tailored": any(
+                getattr(overlay, field) is not None
+                for field in ("name_override", "description_override", "url_override")
+            ),
         }
         for overlay in resume.projects.select_related("project").filter(included=True)
     )
@@ -446,6 +585,7 @@ def _save_canonical_resume_draft(
     account: Account,
     application_id: int,
     values: dict[str, Any],
+    rebuild_scope: str | None = None,
 ) -> Resume:
     application = JobApplication.objects.select_for_update().get(
         pk=application_id,
@@ -528,6 +668,7 @@ def _save_canonical_resume_draft(
     project_sources = _source_map(Project, ids=project_ids, profile=profile)
     education_sources = _source_map(Education, ids=education_ids, profile=profile)
     language_sources = _source_map(Language, ids=language_ids, profile=profile)
+    relevant_experience_ids, relevant_project_ids = _relevant_source_ids(application, profile)
 
     for rows, label in (
         (experience_rows, "Experience"),
@@ -544,6 +685,7 @@ def _save_canonical_resume_draft(
         source_map: dict[int, Any],
         rows: list[dict[str, Any]],
         fields: tuple[str, ...],
+        relevant_ids: set[int] | None = None,
     ) -> dict[int, Any]:
         overlays = {
             getattr(item, f"{source_field}_id"): item
@@ -560,6 +702,8 @@ def _save_canonical_resume_draft(
                 if not row.get("included"):
                     continue
                 item = model(resume=resume, **{source_field: source_map[source_id]})
+                if relevant_ids is not None:
+                    item.is_relevant = source_id in relevant_ids
             item.included = bool(row.get("included"))
             item.position = row["position"] if item.included else 0
             for field in fields:
@@ -581,6 +725,7 @@ def _save_canonical_resume_draft(
             "end_date_override",
             "description_override",
         ),
+        relevant_ids=relevant_experience_ids,
     )
     update_overlay(
         model=ResumeProject,
@@ -588,6 +733,7 @@ def _save_canonical_resume_draft(
         source_map=project_sources,
         rows=project_rows,
         fields=("name_override", "description_override", "url_override"),
+        relevant_ids=relevant_project_ids,
     )
     update_overlay(
         model=ResumeEducation,
@@ -708,6 +854,17 @@ def _save_canonical_resume_draft(
         item.label_override = row.get("label_override") or None if item.included else None
         item.save()
 
+    if rebuild_scope in {"all", "experience"}:
+        ResumeExperience.objects.filter(resume=resume).update(is_relevant=False)
+        ResumeExperience.objects.filter(
+            resume=resume, experience_id__in=relevant_experience_ids
+        ).update(is_relevant=True)
+    if rebuild_scope in {"all", "projects"}:
+        ResumeProject.objects.filter(resume=resume).update(is_relevant=False)
+        ResumeProject.objects.filter(resume=resume, project_id__in=relevant_project_ids).update(
+            is_relevant=True
+        )
+
     resume.full_clean(exclude=["application"])
     resume.save()
     return resume
@@ -719,9 +876,11 @@ def save_resume_draft(
     account: Account,
     application_id: int,
     values: dict[str, Any],
+    rebuild_scope: str | None = None,
 ) -> Resume:
     return _save_canonical_resume_draft(
         account=account,
         application_id=application_id,
         values=values,
+        rebuild_scope=rebuild_scope,
     )
