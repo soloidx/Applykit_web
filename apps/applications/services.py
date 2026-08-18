@@ -316,9 +316,7 @@ def extract_application_skill_requirements(
         pk=application_id,
         account=account,
     )
-    existing_concepts = set(
-        application.skill_requirements.values_list("concept_id", flat=True)
-    )
+    existing_concepts = set(application.skill_requirements.values_list("concept_id", flat=True))
     extracted: list[ApplicationSkillRequirement] = []
     for concept, source_label in _catalog_skill_matches(application.job_description):
         if concept.pk in existing_concepts:

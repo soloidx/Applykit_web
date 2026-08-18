@@ -11,3 +11,11 @@ Triage uses the canonical labels `needs-triage`, `needs-info`, `ready-for-agent`
 ### Domain docs
 
 Domain documentation uses the single-context layout. See `docs/agents/domain.md`.
+
+### CI verification
+
+Run the CI formatter verification from the repository root with:
+
+```sh
+uv run ruff format --check .
+```
