@@ -24,6 +24,14 @@ from apps.profiles.models import (
     Project,
     ProjectSkill,
 )
+from apps.profiles.services import (
+    create_experience_skill,
+    create_profile_skill,
+    create_project_skill,
+    delete_experience_skill,
+    delete_profile_skill,
+    delete_project_skill,
+)
 from apps.skills.models import SkillAlias, SkillConcept
 from apps.skills.services import resolve_skill_label
 
@@ -315,6 +323,66 @@ def create_profile(account: Account) -> CandidateProfile:
         full_name="Ada Lovelace",
         timezone="Europe/London",
     )
+
+
+@pytest.mark.django_db
+def test_skill_association_services_are_account_scoped_and_normalize_after_delete() -> None:
+    owner = verified_account("profile-service-owner@example.com")
+    intruder = verified_account("profile-service-intruder@example.com")
+    profile = create_profile(owner)
+    create_profile(intruder)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    project = Project.objects.create(profile=profile, name="Toolkit")
+
+    profile_skill = create_profile_skill(account=owner, label=" Python ")
+    experience_skill = create_experience_skill(
+        account=owner,
+        experience_id=experience.pk,
+        label="Django",
+    )
+    project_skill = create_project_skill(
+        account=owner,
+        project_id=project.pk,
+        label="Rust",
+    )
+
+    assert profile_skill.label == "Python"
+    assert profile_skill.position == 0
+    assert experience_skill.position == 0
+    assert project_skill.position == 0
+
+    with pytest.raises(ProfileSkill.DoesNotExist):
+        delete_profile_skill(account=intruder, skill_id=profile_skill.pk)
+    with pytest.raises(ExperienceSkill.DoesNotExist):
+        delete_experience_skill(account=intruder, experience_skill_id=experience_skill.pk)
+    with pytest.raises(ProjectSkill.DoesNotExist):
+        delete_project_skill(account=intruder, project_skill_id=project_skill.pk)
+
+    second_profile_skill = create_profile_skill(account=owner, label="TypeScript")
+    delete_profile_skill(account=owner, skill_id=profile_skill.pk)
+    assert ProfileSkill.objects.get(pk=second_profile_skill.pk).position == 0
+
+    second_experience_skill = create_experience_skill(
+        account=owner,
+        experience_id=experience.pk,
+        label="Elixir",
+    )
+    delete_experience_skill(account=owner, experience_skill_id=experience_skill.pk)
+    assert ExperienceSkill.objects.get(pk=second_experience_skill.pk).position == 0
+
+    second_project_skill = create_project_skill(
+        account=owner,
+        project_id=project.pk,
+        label="Kotlin",
+    )
+    delete_project_skill(account=owner, project_skill_id=project_skill.pk)
+    assert ProjectSkill.objects.get(pk=second_project_skill.pk).position == 0
 
 
 @pytest.mark.django_db

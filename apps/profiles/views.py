@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -30,7 +31,14 @@ from apps.profiles.models import (
     Project,
     ProjectSkill,
 )
-from apps.skills.services import resolve_skill_label
+from apps.profiles.services import (
+    create_experience_skill,
+    create_profile_skill,
+    create_project_skill,
+    delete_experience_skill,
+    delete_profile_skill,
+    delete_project_skill,
+)
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -85,9 +93,7 @@ def _profile_context(
         "project_skill_project": project_skill_project,
         "project": project_skill_project,
         "skills": candidate_profile.profile_skills.all(),
-        "skill_form": skill_form
-        if skill_form is not None
-        else SkillAssociationForm(),
+        "skill_form": skill_form if skill_form is not None else SkillAssociationForm(),
         "skill_form_action": skill_form_action or reverse("skill_create"),
         "languages": candidate_profile.languages.all(),
         "language_form": language_form
@@ -165,14 +171,6 @@ def _normalize_highlight_positions(experience: Experience) -> None:
             Highlight.objects.filter(pk=highlight.pk).update(position=position)
 
 
-def _normalize_experience_skill_positions(experience: Experience) -> None:
-    for position, experience_skill in enumerate(
-        experience.experience_skills.order_by("position", "id")
-    ):
-        if experience_skill.position != position:
-            ExperienceSkill.objects.filter(pk=experience_skill.pk).update(position=position)
-
-
 def _normalize_education_positions(profile: CandidateProfile) -> None:
     for position, education in enumerate(profile.educations.order_by("position", "id")):
         if education.position != position:
@@ -183,18 +181,6 @@ def _normalize_project_positions(profile: CandidateProfile) -> None:
     for position, project in enumerate(profile.projects.order_by("position", "id")):
         if project.position != position:
             Project.objects.filter(pk=project.pk).update(position=position)
-
-
-def _normalize_project_skill_positions(project: Project) -> None:
-    for position, project_skill in enumerate(project.project_skills.order_by("position", "id")):
-        if project_skill.position != position:
-            ProjectSkill.objects.filter(pk=project_skill.pk).update(position=position)
-
-
-def _normalize_skill_positions(profile: CandidateProfile) -> None:
-    for position, skill in enumerate(profile.profile_skills.order_by("position", "id")):
-        if skill.position != position:
-            ProfileSkill.objects.filter(pk=skill.pk).update(position=position)
 
 
 def _normalize_language_positions(profile: CandidateProfile) -> None:
@@ -331,24 +317,13 @@ def experience_skill_create(request: HttpRequest, experience_id: int) -> HttpRes
     form = SkillAssociationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            with transaction.atomic():
-                locked_experience = Experience.objects.select_for_update().get(pk=experience.pk)
-                entered_label = form.cleaned_data["label"]
-                concept, _ = resolve_skill_label(entered_label)
-                if ExperienceSkill.objects.filter(
-                    experience=locked_experience,
-                    concept=concept,
-                ).exists():
-                    form.add_error("label", "This skill is already used in this experience.")
-                else:
-                    ExperienceSkill.objects.create(
-                        experience=locked_experience,
-                        concept=concept,
-                        label=entered_label,
-                        position=locked_experience.experience_skills.count(),
-                    )
-        except IntegrityError:
-            form.add_error("label", "This skill is already used in this experience.")
+            create_experience_skill(
+                account=account,
+                experience_id=experience.pk,
+                label=str(form.cleaned_data["label"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
         if not form.errors:
             return _redirect_or_htmx_redirect(request)
 
@@ -370,10 +345,7 @@ def experience_skill_delete(request: HttpRequest, experience_skill_id: int) -> H
     experience_skill = _experience_skill_for_account(account, experience_skill_id)
     if request.method != "POST":
         return HttpResponse(status=405)
-    with transaction.atomic():
-        experience = Experience.objects.select_for_update().get(pk=experience_skill.experience_id)
-        experience_skill.delete()
-        _normalize_experience_skill_positions(experience)
+    delete_experience_skill(account=account, experience_skill_id=experience_skill.pk)
     return _redirect_or_htmx_redirect(request)
 
 
@@ -587,23 +559,13 @@ def project_skill_create(request: HttpRequest, project_id: int) -> HttpResponse:
     form = SkillAssociationForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         try:
-            with transaction.atomic():
-                locked_project = Project.objects.select_for_update().get(pk=project.pk)
-                concept, _ = resolve_skill_label(form.cleaned_data["label"])
-                if ProjectSkill.objects.filter(
-                    project=locked_project,
-                    concept=concept,
-                ).exists():
-                    form.add_error("label", "This skill is already used in this project.")
-                else:
-                    ProjectSkill.objects.create(
-                        project=locked_project,
-                        concept=concept,
-                        label=form.cleaned_data["label"],
-                        position=locked_project.project_skills.count(),
-                    )
-        except IntegrityError:
-            form.add_error("label", "This skill is already used in this project.")
+            create_project_skill(
+                account=account,
+                project_id=project.pk,
+                label=str(form.cleaned_data["label"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
         if not form.errors:
             return _redirect_or_htmx_redirect(request)
 
@@ -625,10 +587,7 @@ def project_skill_delete(request: HttpRequest, project_skill_id: int) -> HttpRes
     project_skill = _project_skill_for_account(account, project_skill_id)
     if request.method != "POST":
         return HttpResponse(status=405)
-    with transaction.atomic():
-        project = Project.objects.select_for_update().get(pk=project_skill.project_id)
-        project_skill.delete()
-        _normalize_project_skill_positions(project)
+    delete_project_skill(account=account, project_skill_id=project_skill.pk)
     return _redirect_or_htmx_redirect(request)
 
 
@@ -751,26 +710,12 @@ def skill_create(request: HttpRequest) -> HttpResponse:
     action = reverse("skill_create")
     if request.method == "POST" and form.is_valid():
         try:
-            with transaction.atomic():
-                locked_profile = CandidateProfile.objects.select_for_update().get(
-                    pk=candidate_profile.pk
-                )
-                entered_label = form.cleaned_data["label"]
-                concept, _ = resolve_skill_label(entered_label)
-                if ProfileSkill.objects.filter(
-                    profile=locked_profile,
-                    concept=concept,
-                ).exists():
-                    form.add_error("label", "This skill is already in your profile.")
-                else:
-                    ProfileSkill.objects.create(
-                        profile=locked_profile,
-                        concept=concept,
-                        label=entered_label,
-                        position=locked_profile.profile_skills.count(),
-                    )
-        except IntegrityError:
-            form.add_error("label", "This skill is already in your profile.")
+            create_profile_skill(
+                account=account,
+                label=str(form.cleaned_data["label"]),
+            )
+        except ValidationError as error:
+            form.add_error("label", error)
         if not form.errors:
             return _redirect_or_htmx_redirect(request)
 
@@ -792,10 +737,7 @@ def skill_delete(request: HttpRequest, skill_id: int) -> HttpResponse:
     skill = _skill_for_account(account, skill_id)
     if request.method != "POST":
         return HttpResponse(status=405)
-    with transaction.atomic():
-        profile = CandidateProfile.objects.select_for_update().get(pk=skill.profile_id)
-        skill.delete()
-        _normalize_skill_positions(profile)
+    delete_profile_skill(account=account, skill_id=skill.pk)
     return _redirect_or_htmx_redirect(request)
 
 
