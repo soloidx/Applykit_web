@@ -4,6 +4,8 @@ from django.apps import apps
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.loader import MigrationLoader
 from django.db.models.deletion import ProtectedError
+from django.test import Client
+from django.urls import reverse
 
 from apps.accounts.models import Account
 from apps.applications.models import ApplicationSkillRequirement, Company, JobApplication
@@ -19,6 +21,8 @@ from apps.profiles.models import (
     Project,
     ProjectSkill,
 )
+from apps.profiles.services import create_experience_skill, delete_experience_skill
+from apps.resumes.forms import ResumeDraftForm
 from apps.resumes.models import (
     Resume,
     ResumeEducation,
@@ -29,6 +33,7 @@ from apps.resumes.models import (
     ResumeSection,
     ResumeSkill,
 )
+from apps.resumes.services import open_resume
 from apps.skills.models import SkillConcept
 
 pytestmark = pytest.mark.integration
@@ -339,3 +344,163 @@ def test_application_deletion_cascades_resume_and_requirement_but_not_profile_so
     assert not ApplicationSkillRequirement.objects.filter(application_id=application_id).exists()
     assert CandidateProfile.objects.filter(pk=profile.pk).exists()
     assert SkillConcept.objects.filter(pk=concept.pk).exists()
+
+
+@pytest.mark.django_db
+def test_open_resume_initializes_sections_membership_and_deterministic_skills_once() -> None:
+    account = verified_candidate("resume-initialize@example.com")
+    application = application_for(account)
+    profile = account.candidate_profile
+    required_high_evidence = SkillConcept.objects.create(canonical_name="Python")
+    required_low_evidence = SkillConcept.objects.create(canonical_name="Django")
+    preferred = SkillConcept.objects.create(canonical_name="PostgreSQL")
+    unmatched = SkillConcept.objects.create(canonical_name="Rust")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=required_high_evidence,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=required_low_evidence,
+        label="Django",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=preferred,
+        label="PostgreSQL",
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    first_experience = Experience.objects.create(
+        profile=profile,
+        role="First",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    second_experience = Experience.objects.create(
+        profile=profile,
+        role="Second",
+        organization="Example",
+        location="London",
+        start_date="2021-01-01",
+    )
+    ExperienceSkill.objects.create(
+        experience=first_experience, concept=required_high_evidence, label="Python"
+    )
+    ExperienceSkill.objects.create(experience=first_experience, concept=preferred, label="Postgres")
+    ExperienceSkill.objects.create(
+        experience=second_experience, concept=required_high_evidence, label="Python"
+    )
+    ExperienceSkill.objects.create(
+        experience=second_experience, concept=required_low_evidence, label="Django"
+    )
+    first_project = Project.objects.create(profile=profile, name="First project")
+    second_project = Project.objects.create(profile=profile, name="Second project")
+    ProjectSkill.objects.create(project=first_project, concept=unmatched, label="Rust")
+    ProjectSkill.objects.create(
+        project=second_project, concept=required_low_evidence, label="Django"
+    )
+    ProfileSkill.objects.create(profile=profile, concept=preferred, label="SQL")
+
+    resume, created = open_resume(account=account, application_id=application.pk)
+
+    assert created is True
+    assert list(resume.sections.values_list("kind", flat=True)) == [
+        ResumeSection.Kind.SUMMARY,
+        ResumeSection.Kind.SKILLS,
+        ResumeSection.Kind.EXPERIENCE,
+        ResumeSection.Kind.PROJECTS,
+        ResumeSection.Kind.EDUCATION,
+        ResumeSection.Kind.LANGUAGES,
+    ]
+    assert list(resume.experiences.values_list("experience_id", flat=True)) == [
+        first_experience.pk,
+        second_experience.pk,
+    ]
+    assert list(resume.projects.values_list("project_id", flat=True)) == [
+        second_project.pk,
+        first_project.pk,
+    ]
+    assert list(resume.skills.values_list("concept_id", flat=True)) == [
+        required_high_evidence.pk,
+        required_low_evidence.pk,
+        preferred.pk,
+        unmatched.pk,
+    ]
+    assert list(resume.skills.values_list("position", flat=True)) == [0, 1, 2, 3]
+
+    ResumeSection.objects.filter(resume=resume, kind=ResumeSection.Kind.SKILLS).update(position=99)
+    reopened, reopened_created = open_resume(account=account, application_id=application.pk)
+
+    assert reopened_created is False
+    assert reopened.pk == resume.pk
+    assert reopened.sections.get(kind=ResumeSection.Kind.SKILLS).position == 99
+
+
+@pytest.mark.django_db
+def test_resume_detail_is_account_scoped_and_renders_live_profile_header() -> None:
+    owner = verified_candidate("resume-http-owner@example.com")
+    intruder = verified_candidate("resume-http-intruder@example.com")
+    application = application_for(owner)
+    owner.candidate_profile.contact_email = "ada-resume@example.com"
+    owner.candidate_profile.save(update_fields=["contact_email", "updated_at"])
+    client = Client()
+    client.force_login(owner)
+
+    response = client.get(reverse("resume_detail", args=[application.pk]))
+
+    assert response.status_code == 200
+    assert Resume.objects.filter(application=application).count() == 1
+    assert b"Ada Lovelace" in response.content
+    assert b"ada-resume@example.com" in response.content
+    assert b"Resume" in response.content
+
+    resume = Resume.objects.get(application=application)
+    draft_form = ResumeDraftForm(resume=resume)
+    draft = {
+        name: field.initial
+        for name, field in draft_form.fields.items()
+        if field.required and field.initial is not None
+    }
+    draft["full_name"] = "Tailored Ada Lovelace"
+    saved = client.post(
+        reverse("resume_save", args=[application.pk]),
+        draft,
+    )
+
+    assert saved.status_code == 302
+    assert saved.headers["Location"] == reverse("resume_detail", args=[application.pk])
+    assert Resume.objects.get(application=application).full_name_override == "Tailored Ada Lovelace"
+    assert owner.candidate_profile.full_name == "Ada Lovelace"
+    assert (
+        b"Tailored Ada Lovelace"
+        in client.get(reverse("resume_detail", args=[application.pk])).content
+    )
+
+    client.force_login(intruder)
+    private_response = client.get(reverse("resume_detail", args=[application.pk]))
+
+    assert private_response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_profile_skill_service_appends_and_removes_resume_skill_at_final_source() -> None:
+    account = verified_candidate("resume-skill-integration@example.com")
+    application = application_for(account)
+    experience = Experience.objects.create(
+        profile=account.candidate_profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    resume, _created = open_resume(account=account, application_id=application.pk)
+
+    created = create_experience_skill(account=account, experience_id=experience.pk, label="Python")
+
+    assert ResumeSkill.objects.filter(resume=resume, concept=created.concept).count() == 1
+    delete_experience_skill(account=account, experience_skill_id=created.pk)
+    assert not ResumeSkill.objects.filter(resume=resume, concept=created.concept).exists()

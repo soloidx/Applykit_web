@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Resume | {{ application.role_title }} | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-5xl px-6 py-12 sm:py-20">
+  <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_detail' application.pk %}">Back to application</a>
+  <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <article class="rounded-[2rem] bg-white p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-12" aria-label="Resume document">
+      <header class="border-b border-ink/10 pb-8">
+        <p class="text-sm font-semibold uppercase tracking-[0.18em] text-coral">Resume</p>
+        <h1 class="mt-3 font-display text-5xl font-semibold tracking-tight">{{ document.header.full_name }}</h1>
+        {% if document.header.professional_title %}<p class="mt-2 text-lg text-ink/70">{{ document.header.professional_title }}</p>{% endif %}
+        <div class="mt-5 grid gap-1 text-sm text-ink/65 sm:grid-cols-2">
+          {% if document.header.contact_email %}<p>{{ document.header.contact_email }}</p>{% endif %}
+          {% if document.header.phone_number %}<p>{{ document.header.phone_number }}</p>{% endif %}
+          {% if document.header.location %}<p>{{ document.header.location }}</p>{% endif %}
+          {% if document.header.linkedin_url %}<p><a class="text-coral" href="{{ document.header.linkedin_url }}">LinkedIn</a></p>{% endif %}
+          {% if document.header.portfolio_url %}<p><a class="text-coral" href="{{ document.header.portfolio_url }}">Portfolio</a></p>{% endif %}
+        </div>
+      </header>
+
+      {% for section in document.sections %}
+      {% if section.kind == "summary" and document.header.professional_summary %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Summary</h2><p class="mt-3 whitespace-pre-line text-ink/75">{{ document.header.professional_summary }}</p></section>{% endif %}
+      {% if section.kind == "skills" and document.skills %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Skills</h2><ul class="mt-3 flex flex-wrap gap-2">{% for skill in document.skills %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ skill.label }}</li>{% endfor %}</ul></section>{% endif %}
+      {% if section.kind == "experience" and document.experiences %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Experience</h2><div class="mt-4 grid gap-6">{% for experience in document.experiences %}<article><h3 class="font-semibold">{{ experience.role }} · {{ experience.organization }}</h3><p class="text-sm text-ink/60">{{ experience.location }} · {{ experience.start_date }}{% if experience.end_date %} - {{ experience.end_date }}{% endif %}</p>{% if experience.description %}<p class="mt-2 whitespace-pre-line text-ink/75">{{ experience.description }}</p>{% endif %}{% if experience.highlights %}<ul class="mt-2 list-disc space-y-1 pl-5 text-ink/75">{% for highlight in experience.highlights %}<li>{{ highlight.text }}</li>{% endfor %}</ul>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+      {% if section.kind == "projects" and document.projects %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Projects</h2><div class="mt-4 grid gap-5">{% for project in document.projects %}<article><h3 class="font-semibold">{{ project.name }}</h3><p class="mt-1 whitespace-pre-line text-ink/75">{{ project.description }}</p>{% if project.url %}<a class="text-sm text-coral" href="{{ project.url }}">Project link</a>{% endif %}</article>{% endfor %}</div></section>{% endif %}
+      {% if section.kind == "education" and document.educations %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Education</h2><ul class="mt-4 grid gap-3">{% for education in document.educations %}<li><strong>{{ education.degree }}</strong> · {{ education.institution }} · {{ education.start_date }}{% if education.end_date %} - {{ education.end_date }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+      {% if section.kind == "languages" and document.languages %}<section class="mt-8"><h2 class="font-display text-2xl font-semibold">Languages</h2><ul class="mt-4 flex flex-wrap gap-2">{% for language in document.languages %}<li class="rounded-full bg-sand px-3 py-1 text-sm">{{ language.name }}{% if language.proficiency %} ({{ language.proficiency }}){% endif %}</li>{% endfor %}</ul></section>{% endif %}
+      {% endfor %}
+    </article>
+
+    <aside class="h-fit rounded-[2rem] border border-ink/10 bg-cream p-6">
+      <h2 class="font-display text-2xl font-semibold">Tailor resume</h2>
+      <p class="mt-2 text-sm text-ink/65">Blank override fields inherit the current Candidate Profile.</p>
+      <form class="mt-6 grid gap-4" method="post" action="{% url 'resume_save' application.pk %}">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
+        <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">Save Resume</button>
+      </form>
+    </aside>
+  </div>
+</section>
+{% endblock %}

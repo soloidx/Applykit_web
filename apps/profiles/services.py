@@ -25,12 +25,19 @@ def create_profile_skill(*, account: Account, label: str) -> ProfileSkill:
         raise ValidationError("This skill is already in your profile.")
     try:
         with transaction.atomic():
-            return ProfileSkill.objects.create(
+            skill = ProfileSkill.objects.create(
                 profile=profile,
                 concept=concept,
                 label=display_label,
                 position=profile.profile_skills.count(),
             )
+            from apps.resumes.services import append_resume_skill
+
+            append_resume_skill(
+                account=account,
+                concept_id=skill.concept_id,
+            )
+            return skill
     except IntegrityError as error:
         raise ValidationError("This skill is already in your profile.") from error
 
@@ -47,10 +54,14 @@ def delete_profile_skill(*, account: Account, skill_id: int) -> None:
     )
     profile = CandidateProfile.objects.select_for_update().get(pk=profile_id, account=account)
     skill = ProfileSkill.objects.select_for_update().get(pk=skill_id, profile=profile)
+    concept_id = skill.concept_id
     skill.delete()
     for position, remaining_skill in enumerate(profile.profile_skills.order_by("position", "id")):
         if remaining_skill.position != position:
             ProfileSkill.objects.filter(pk=remaining_skill.pk).update(position=position)
+    from apps.resumes.services import remove_resume_skill_if_unreferenced
+
+    remove_resume_skill_if_unreferenced(account=account, concept_id=concept_id)
 
 
 @transaction.atomic
@@ -65,12 +76,20 @@ def create_experience_skill(*, account: Account, experience_id: int, label: str)
         raise ValidationError("This skill is already used in this experience.")
     try:
         with transaction.atomic():
-            return ExperienceSkill.objects.create(
+            skill = ExperienceSkill.objects.create(
                 experience=experience,
                 concept=concept,
                 label=display_label,
                 position=experience.experience_skills.count(),
             )
+            from apps.resumes.services import append_resume_skill
+
+            append_resume_skill(
+                account=account,
+                concept_id=skill.concept_id,
+                experience_id=experience.pk,
+            )
+            return skill
     except IntegrityError as error:
         raise ValidationError("This skill is already used in this experience.") from error
 
@@ -93,12 +112,16 @@ def delete_experience_skill(*, account: Account, experience_skill_id: int) -> No
         pk=experience_skill_id,
         experience=experience,
     )
+    concept_id = experience_skill.concept_id
     experience_skill.delete()
     for position, remaining_skill in enumerate(
         experience.experience_skills.order_by("position", "id")
     ):
         if remaining_skill.position != position:
             ExperienceSkill.objects.filter(pk=remaining_skill.pk).update(position=position)
+    from apps.resumes.services import remove_resume_skill_if_unreferenced
+
+    remove_resume_skill_if_unreferenced(account=account, concept_id=concept_id)
 
 
 @transaction.atomic
@@ -113,12 +136,20 @@ def create_project_skill(*, account: Account, project_id: int, label: str) -> Pr
         raise ValidationError("This skill is already used in this project.")
     try:
         with transaction.atomic():
-            return ProjectSkill.objects.create(
+            skill = ProjectSkill.objects.create(
                 project=project,
                 concept=concept,
                 label=display_label,
                 position=project.project_skills.count(),
             )
+            from apps.resumes.services import append_resume_skill
+
+            append_resume_skill(
+                account=account,
+                concept_id=skill.concept_id,
+                project_id=project.pk,
+            )
+            return skill
     except IntegrityError as error:
         raise ValidationError("This skill is already used in this project.") from error
 
@@ -141,7 +172,11 @@ def delete_project_skill(*, account: Account, project_skill_id: int) -> None:
         pk=project_skill_id,
         project=project,
     )
+    concept_id = project_skill.concept_id
     project_skill.delete()
     for position, remaining_skill in enumerate(project.project_skills.order_by("position", "id")):
         if remaining_skill.position != position:
             ProjectSkill.objects.filter(pk=remaining_skill.pk).update(position=position)
+    from apps.resumes.services import remove_resume_skill_if_unreferenced
+
+    remove_resume_skill_if_unreferenced(account=account, concept_id=concept_id)

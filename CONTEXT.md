@@ -13,7 +13,7 @@ The first release is the tracking core:
 - job applications with stage history
 - upcoming recruitment events on the dashboard
 
-Resume generation, cover-letter generation, company research, AI suggestions, and email reminders are future capabilities. Do not create empty apps or speculative abstractions for them.
+Tailored Resume workbenches are available for Job Applications. Cover Letter authoring, company research, AI suggestions, and email reminders remain future capabilities. Do not create speculative abstractions for them.
 
 ## Core workflow
 
@@ -89,6 +89,14 @@ A private, candidate-editable hard-skill requirement attached to one Job Applica
 
 The candidate may add, edit, or remove requirements. Re-extracting requirements after a job-description change only adds newly found concepts; it does not remove requirements that are no longer present in the text.
 
+### Resume
+
+An application-owned, private document that opens lazily for one Job Application. A Resume is a relational live overlay over its Account's Candidate Profile: source content inherits current profile values until a Resume-specific override is saved. Blank overrides reset to inheritance. Membership, inclusion, ordering, and overrides are application-specific, and Reset Resume rebuilds them from current profile and application requirements. A Resume cannot be independently deleted; deleting its Job Application deletes it.
+
+### Cover Letter
+
+An optional application-owned, private document. Reading an application does not create one. The first successful save creates sanitized content; deleting it returns the application to Not created. Deleting its Job Application or Account deletes it.
+
 ### Skill Coverage
 
 The live comparison between a Job Application's Skill Concepts and the unique Skill Concepts referenced by all of the candidate's Profile, Experience, and Project skill associations. Coverage is shown as matched and missing lists separated into Required and Preferred requirements. It is derived on every read and is not persisted as a score or snapshot.
@@ -142,13 +150,13 @@ The initial Django apps are:
 - `profiles`: Candidate Profile and its ordered career-history records
 - `campaigns`: Campaign lifecycle, targets, and progress calculations
 - `applications`: Company, Job Application, Stage Transition, and Recruitment Event
+- `resumes`: application-owned Resume live overlays and deterministic initialization
+- `cover_letters`: optional application-owned Cover Letter content
 
-Future capabilities should use `resumes` and `cover_letters` app names when their behavior is implemented. AI-assisted research and suggestions need a separate decision about provider boundaries, consent, retention, and handling of candidate data before implementation.
+AI-assisted research and suggestions need a separate decision about provider boundaries, consent, retention, and handling of candidate data before implementation.
 
 ## Unresolved future questions
 
-- Whether a Resume snapshots profile data or always reflects the latest Candidate Profile
-- How tailored Resume and Cover Letter variants relate to a Job Application
 - Which AI providers are permitted to receive candidate and job-description data
 - What consent, redaction, retention, and deletion rules apply to AI requests and outputs
 - When asynchronous tasks, Redis, Celery, and email reminders become necessary

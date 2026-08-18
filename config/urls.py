@@ -10,6 +10,7 @@ urlpatterns = [
     path("", include("apps.applications.urls")),
     path("", include("apps.profiles.urls")),
     path("", include("apps.campaigns.urls")),
+    path("", include("apps.resumes.urls")),
     path("dashboard/", dashboard, name="dashboard"),
     path("", home, name="home"),
 ]
