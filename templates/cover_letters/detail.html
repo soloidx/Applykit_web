@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Cover Letter | {{ application.role_title }} | ApplyKit{% endblock %}
+
+{% block content %}
+{% if editor_open %}<link rel="stylesheet" href="{% static 'vendor/quill/quill.snow.css' %}">{% endif %}
+<div class="min-h-screen pb-20" data-cover-letter-workbench data-dirty="{% if editor_dirty %}true{% else %}false{% endif %}">
+  <header class="border-b border-ink/10 bg-cream/80">
+    <div class="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_detail' application.pk %}" data-action="back">Back to application</a>
+        <div class="mt-2 flex flex-wrap items-center gap-3">
+          <h1 class="font-display text-3xl font-semibold sm:text-4xl">Cover Letter</h1>
+          <span class="rounded-full bg-mint/50 px-3 py-1 text-xs font-bold uppercase tracking-wider">Optional</span>
+        </div>
+        <p class="mt-2 text-sm text-ink/60">{{ application.company.name }} · {{ application.role_title }}</p>
+      </div>
+      {% if editor_open %}
+      <div class="flex flex-wrap items-center gap-3">
+        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if editor_dirty or save_failed %}Unsaved changes{% else %}Saved{% endif %}</p>
+        <button class="rounded-full bg-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink" type="submit" form="cover-letter-form">Save letter</button>
+      </div>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if not cover_letter and not editor_open %}
+  <main class="mx-auto max-w-3xl px-5 py-12 sm:px-8 lg:py-16">
+    <section class="rounded-[2rem] border border-ink/10 bg-white p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-12">
+      <p class="text-xs font-bold uppercase tracking-[0.18em] text-coral">Optional document</p>
+      <h2 class="mt-3 font-display text-4xl font-semibold">Not created</h2>
+      <p class="mt-4 max-w-xl text-sm leading-6 text-ink/65">Reading this page does not create a Cover Letter. Start a local draft, then save it when you are ready.</p>
+      <div class="mt-8 flex flex-wrap gap-3">
+        <a class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white hover:bg-ink" href="?draft=blank">New blank letter</a>
+        <a class="rounded-full border border-ink/20 px-5 py-3 text-sm font-semibold hover:border-coral hover:text-coral" href="?draft=template">Load starter template</a>
+      </div>
+    </section>
+  </main>
+  {% else %}
+  <main class="mx-auto grid max-w-7xl gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[19rem_minmax(0,1fr)]">
+    <aside class="h-fit space-y-5 rounded-3xl bg-ink p-5 text-white lg:sticky lg:top-6">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-wider text-yellow">Job context</p>
+        <h2 class="mt-2 font-display text-2xl font-semibold">{{ application.role_title }}</h2>
+        <p class="mt-1 text-sm text-white/65">{{ application.company.name }}</p>
+      </div>
+      <div class="border-t border-white/15 pt-5">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-white/55">Job description</h3>
+        <p class="mt-3 whitespace-pre-line text-sm leading-6 text-white/75">{{ application.job_description }}</p>
+      </div>
+      {% if cover_letter %}
+      <noscript>
+        <form class="border-t border-white/15 pt-5" method="post" action="{% url 'cover_letter_delete' application.pk %}">
+          {% csrf_token %}
+          <p class="text-xs leading-5 text-white/55">Deleting the saved letter is permanent. Unsaved edits are discarded too.</p>
+          <button class="mt-4 rounded-full border border-white/25 px-4 py-2 text-sm font-semibold hover:border-yellow hover:text-yellow" type="submit">Delete Cover Letter</button>
+        </form>
+      </noscript>
+      {% endif %}
+    </aside>
+
+    <section class="min-w-0 rounded-[2rem] border border-ink/10 bg-white p-5 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-8 lg:p-10">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b border-ink/10 pb-6">
+        <div><p class="text-xs font-bold uppercase tracking-[0.18em] text-coral">One continuous letter</p><h2 class="mt-2 font-display text-3xl font-semibold">Write with the role in view</h2></div>
+        {% if cover_letter %}
+        <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold hover:border-coral hover:text-coral" type="button" data-action="delete">Delete letter</button>
+        {% endif %}
+      </div>
+      {% if save_failed %}<div class="mt-5 rounded-xl bg-coral/10 p-4 text-sm" role="alert">Save failed. Your complete draft is preserved for correction or retry.</div>{% endif %}
+      <form id="cover-letter-form" class="mt-6" method="post" action="{% url 'cover_letter_save' application.pk %}">
+        {% csrf_token %}
+        {{ cover_letter_form.non_field_errors }}
+        <div class="cover-letter-editor" data-editor>
+          <div class="mb-3 flex flex-wrap gap-2 border-b border-ink/10 pb-3" data-toolbar aria-label="Formatting tools">
+            <select class="ql-header rounded-lg border border-ink/15 px-3 py-1 text-sm" aria-label="Paragraph style"><option selected value="">Paragraph</option><option value="2">Heading</option></select>
+            <button class="ql-bold rounded-lg border border-ink/15 px-3 py-1 text-sm font-semibold" type="button" aria-label="Bold">B</button>
+            <button class="ql-italic rounded-lg border border-ink/15 px-3 py-1 text-sm italic" type="button" aria-label="Italic">I</button>
+            <button class="ql-list rounded-lg border border-ink/15 px-3 py-1 text-sm" type="button" value="bullet" aria-label="Bulleted list">Bullets</button>
+            <button class="ql-list rounded-lg border border-ink/15 px-3 py-1 text-sm" type="button" value="ordered" aria-label="Numbered list">Numbered</button>
+            <button class="ql-link rounded-lg border border-ink/15 px-3 py-1 text-sm" type="button" aria-label="Add link">Link</button>
+          </div>
+          <div class="mb-3 hidden min-h-80 rounded-2xl border border-ink/20 bg-white p-5 text-sm leading-7 focus-within:border-coral" contenteditable="true" data-rich-editor role="textbox" aria-label="Cover Letter editor"></div>
+          {{ cover_letter_form.body_html }}
+          {{ cover_letter_form.body_html.errors }}
+        </div>
+        <div class="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-ink/10 pt-6">
+          <p class="text-sm text-ink/55">Native textarea editing and saving remain available without JavaScript.</p>
+          <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white hover:bg-ink" type="submit">Save letter</button>
+        </div>
+      </form>
+      {% if cover_letter %}
+      <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="delete-cover-letter-title" data-delete-dialog>
+        <div class="p-6">
+          <h2 id="delete-cover-letter-title" class="font-display text-2xl font-semibold">Delete this Cover Letter?</h2>
+          <p class="mt-3 text-sm leading-6 text-ink/70" data-delete-copy>Saved content and any unsaved edits will be discarded.</p>
+          <form class="mt-6 flex justify-end gap-3" method="post" action="{% url 'cover_letter_delete' application.pk %}" data-delete-form>
+            {% csrf_token %}
+            <input type="hidden" name="confirm" value="1">
+            <input type="hidden" name="dirty" value="0" data-delete-dirty>
+            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-action="cancel-delete">Cancel</button>
+            <button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" type="submit">Delete permanently</button>
+          </form>
+        </div>
+      </dialog>
+      {% endif %}
+      <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="discard-cover-letter-title" data-exit-dialog>
+        <div class="p-6">
+          <h2 id="discard-cover-letter-title" class="font-display text-2xl font-semibold">Discard unsaved changes?</h2>
+          <p class="mt-3 text-sm leading-6 text-ink/70">Your local Cover Letter draft has not been saved.</p>
+          <form class="mt-6 flex justify-end gap-3" method="dialog">
+            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="submit" value="cancel">Keep editing</button>
+            <button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" type="submit" value="discard">Discard changes</button>
+          </form>
+        </div>
+      </dialog>
+    </section>
+  </main>
+  <noscript><p class="mx-auto max-w-7xl px-5 pb-8 text-sm text-ink/60 sm:px-8">JavaScript is optional. Use the native textarea and Save letter button. The Delete Cover Letter button opens a server-rendered confirmation page.</p></noscript>
+  {% endif %}
+  {{ starter_template|json_script:"cover-letter-starter" }}
+  {{ baseline_body|json_script:"cover-letter-baseline" }}
+</div>
+{% if editor_open %}<script src="{% static 'vendor/quill/quill.min.js' %}"></script>{% endif %}
+<script src="{% static 'js/cover_letter_editor.js' %}"></script>
+{% endblock %}

@@ -5,11 +5,14 @@ from allauth.account.models import EmailAddress
 from django.apps import apps
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.loader import MigrationLoader
+from django.test import Client
+from django.urls import reverse
 
 from apps.accounts.models import Account
 from apps.applications.models import Company, JobApplication
 from apps.campaigns.models import Campaign
 from apps.cover_letters.models import CoverLetter
+from apps.cover_letters.services import build_cover_letter_starter_template
 from apps.profiles.models import CandidateProfile
 
 pytestmark = pytest.mark.integration
@@ -121,3 +124,189 @@ def test_deleting_application_cascades_cover_letter() -> None:
     application.delete()
 
     assert not CoverLetter.objects.filter(pk=cover_letter.pk).exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_starter_template_is_deterministic_and_uses_current_context() -> None:
+    account = verified_candidate("cover-letter-template@example.com")
+    application = application_for(account, "Staff engineer")
+
+    assert build_cover_letter_starter_template(
+        application=application, profile=account.candidate_profile
+    ) == (
+        "<p>Dear Hiring Team,</p>"
+        "<p>I am writing to apply for the Staff engineer position at Staff engineer Company.</p>"
+        "<p>[Describe one or two relevant experiences, achievements, or skills "
+        "that address this role.]</p>"
+        "<p>[Explain why this role and Staff engineer Company interest you.]</p>"
+        "<p>Thank you for your time and consideration.</p>"
+        "<p>Sincerely,<br>Ada Lovelace</p>"
+    )
+
+
+@pytest.mark.django_db
+def test_cover_letter_workbench_is_optional_until_first_successful_save() -> None:
+    account = verified_candidate("cover-letter-workbench@example.com")
+    application = application_for(account)
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("cover_letter_detail", args=[application.pk]))
+
+    assert response.status_code == 200
+    assert b"Not created" in response.content
+    assert b"New blank letter" in response.content
+    assert b"Load starter template" in response.content
+    assert not CoverLetter.objects.exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_save_sanitizes_updates_and_supports_htmx_redirects() -> None:
+    account = verified_candidate("cover-letter-save@example.com")
+    application = application_for(account)
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("cover_letter_save", args=[application.pk]),
+        {"body_html": "<p>Hello <strong>team</strong>.</p><script>alert(1)</script>"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == reverse("cover_letter_detail", args=[application.pk])
+    assert CoverLetter.objects.get(application=application).body_html == (
+        "<p>Hello <strong>team</strong>.</p>"
+    )
+
+    response = client.post(
+        reverse("cover_letter_save", args=[application.pk]),
+        {"body_html": "<p>Updated.</p>"},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == reverse("cover_letter_detail", args=[application.pk])
+    assert CoverLetter.objects.get(application=application).body_html == "<p>Updated.</p>"
+
+
+@pytest.mark.django_db
+def test_blank_cover_letter_save_rejects_without_deleting_existing_letter() -> None:
+    account = verified_candidate("cover-letter-blank@example.com")
+    application = application_for(account)
+    CoverLetter.objects.create(application=application, body_html="<p>Keep me.</p>")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("cover_letter_save", args=[application.pk]),
+        {"body_html": "<p><br></p><p> </p>"},
+    )
+
+    assert response.status_code == 200
+    assert b"must contain visible text" in response.content
+    assert CoverLetter.objects.get(application=application).body_html == "<p>Keep me.</p>"
+
+
+@pytest.mark.django_db
+def test_blank_first_save_does_not_create_a_cover_letter() -> None:
+    account = verified_candidate("cover-letter-blank-first@example.com")
+    application = application_for(account)
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("cover_letter_save", args=[application.pk]),
+        {"body_html": "<p> </p>"},
+    )
+
+    assert response.status_code == 200
+    assert not CoverLetter.objects.exists()
+
+
+@pytest.mark.django_db
+def test_failed_cover_letter_update_preserves_saved_content_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = verified_candidate("cover-letter-rollback@example.com")
+    application = application_for(account)
+    CoverLetter.objects.create(application=application, body_html="<p>Keep me.</p>")
+
+    def fail_save(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(CoverLetter, "save", fail_save)
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("cover_letter_save", args=[application.pk]),
+        {"body_html": "<p>Retry me.</p>"},
+    )
+
+    assert response.status_code == 200
+    assert b"Save failed" in response.content
+    assert b"Retry me." in response.content
+    assert CoverLetter.objects.get(application=application).body_html == "<p>Keep me.</p>"
+
+
+@pytest.mark.django_db
+def test_cover_letter_delete_requires_confirmation_then_returns_to_not_created() -> None:
+    account = verified_candidate("cover-letter-delete@example.com")
+    application = application_for(account)
+    CoverLetter.objects.create(application=application, body_html="<p>Delete me.</p>")
+    client = Client()
+    client.force_login(account)
+
+    confirmation = client.post(reverse("cover_letter_delete", args=[application.pk]))
+
+    assert confirmation.status_code == 200
+    assert b"Delete this Cover Letter" in confirmation.content
+    assert CoverLetter.objects.filter(application=application).exists()
+
+    deleted = client.post(
+        reverse("cover_letter_delete", args=[application.pk]),
+        {"confirm": "1"},
+    )
+
+    assert deleted.status_code == 302
+    assert deleted.headers["Location"] == reverse("cover_letter_detail", args=[application.pk])
+    assert not CoverLetter.objects.filter(application=application).exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_delete_supports_htmx_redirect_parity() -> None:
+    account = verified_candidate("cover-letter-delete-htmx@example.com")
+    application = application_for(account)
+    CoverLetter.objects.create(application=application, body_html="<p>Delete me.</p>")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(
+        reverse("cover_letter_delete", args=[application.pk]),
+        {"confirm": "1"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == reverse("cover_letter_detail", args=[application.pk])
+    assert not CoverLetter.objects.filter(application=application).exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_routes_are_account_scoped_and_post_only_for_mutations() -> None:
+    owner = verified_candidate("cover-letter-route-owner@example.com")
+    intruder = verified_candidate("cover-letter-route-intruder@example.com")
+    application = application_for(owner)
+    client = Client()
+    client.force_login(intruder)
+
+    assert client.get(reverse("cover_letter_detail", args=[application.pk])).status_code == 404
+    assert (
+        client.post(
+            reverse("cover_letter_save", args=[application.pk]),
+            {"body_html": "<p>x</p>"},
+        ).status_code
+        == 404
+    )
+    assert client.get(reverse("cover_letter_save", args=[application.pk])).status_code == 405
+    assert client.get(reverse("cover_letter_delete", args=[application.pk])).status_code == 405

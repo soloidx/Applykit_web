@@ -12,6 +12,7 @@
   <a class="mt-5 inline-block text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_edit' application.pk %}">Edit draft</a>
   {% endif %}
   <a class="mt-5 ml-5 inline-block text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'resume_detail' application.pk %}">Open Resume</a>
+  <a class="mt-5 ml-5 inline-block text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'cover_letter_detail' application.pk %}">Open Cover Letter</a>
   <a class="mt-5 ml-5 inline-block text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'application_delete' application.pk %}">Delete application</a>
 
   <div class="mt-10 rounded-[2rem] border border-ink/10 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">

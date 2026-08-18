@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Delete Cover Letter | {{ application.role_title }} | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-3xl px-6 py-16 sm:py-24">
+  <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'cover_letter_detail' application.pk %}">Back to Cover Letter</a>
+  <p class="mt-5 text-sm font-semibold uppercase tracking-[0.18em] text-coral">Permanent deletion</p>
+  <h1 class="mt-3 font-display text-5xl font-semibold tracking-tight">Delete this Cover Letter?</h1>
+  <p class="mt-5 text-lg leading-8 text-ink/70">This permanently deletes the saved Cover Letter for {{ application.role_title }} at {{ application.company.name }}. It cannot be undone.</p>
+  {% if dirty %}<p class="mt-4 rounded-xl bg-coral/10 p-4 text-sm" role="alert">Your unsaved edits will also be discarded.</p>{% endif %}
+  <form class="mt-8 flex flex-wrap gap-4" method="post" action="{% url 'cover_letter_delete' application.pk %}">
+    {% csrf_token %}
+    <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit" name="confirm" value="1">Delete permanently</button>
+    <button class="rounded-full border border-ink/20 px-5 py-3 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit" name="cancel" value="1">Cancel</button>
+  </form>
+</section>
+{% endblock %}

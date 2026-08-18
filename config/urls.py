@@ -11,6 +11,7 @@ urlpatterns = [
     path("", include("apps.profiles.urls")),
     path("", include("apps.campaigns.urls")),
     path("", include("apps.resumes.urls")),
+    path("", include("apps.cover_letters.urls")),
     path("dashboard/", dashboard, name="dashboard"),
     path("", home, name="home"),
 ]
