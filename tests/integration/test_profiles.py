@@ -40,6 +40,7 @@ def profile_data(**overrides: str) -> dict[str, str]:
     data = {
         "full_name": "Ada Lovelace",
         "timezone": "Europe/London",
+        "contact_email": "contact@example.com",
         "professional_title": "Analytical engine specialist",
         "professional_summary": "I make complex systems easier to understand.",
         "phone_number": "+44 20 7946 0958",
@@ -69,6 +70,59 @@ def test_verified_account_is_sent_to_profile_before_private_dashboard() -> None:
 
     assert response.status_code == 302
     assert response.url == reverse("profile")
+    assert CandidateProfile.objects.filter(account=account).exists() is False
+
+
+@pytest.mark.django_db
+def test_new_profile_contact_email_starts_with_account_email() -> None:
+    account = verified_account("candidate@example.com")
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("profile"))
+
+    assert response.status_code == 200
+    assert response.context["form"]["contact_email"].value() == account.email
+
+
+@pytest.mark.django_db
+def test_profile_contact_email_is_required_editable_and_independent_from_account_email() -> None:
+    account = verified_account("candidate@example.com")
+    client = Client()
+    client.force_login(account)
+
+    created = client.post(
+        reverse("profile"),
+        profile_data(contact_email="documents@example.com"),
+    )
+
+    assert created.status_code == 302
+    profile = CandidateProfile.objects.get(account=account)
+    assert profile.contact_email == "documents@example.com"
+
+    account.email = "new-sign-in@example.com"
+    account.save(update_fields=["email"])
+
+    updated = client.post(
+        reverse("profile"),
+        profile_data(contact_email="updated-documents@example.com"),
+    )
+
+    assert updated.status_code == 302
+    profile.refresh_from_db()
+    assert profile.contact_email == "updated-documents@example.com"
+
+
+@pytest.mark.django_db
+def test_profile_contact_email_is_required() -> None:
+    account = verified_account("candidate@example.com")
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(reverse("profile"), profile_data(contact_email=""))
+
+    assert response.status_code == 200
+    assert b"This field is required." in response.content
     assert CandidateProfile.objects.filter(account=account).exists() is False
 
 

@@ -227,7 +227,8 @@ def profile(request: HttpRequest) -> HttpResponse:
                 return response
             return redirect("dashboard")
     else:
-        form = CandidateProfileForm(instance=candidate_profile)
+        initial = {"contact_email": account.email} if candidate_profile is None else None
+        form = CandidateProfileForm(instance=candidate_profile, initial=initial)
 
     template = "profiles/_form.html" if _is_htmx(request) else "profiles/profile.html"
     context: dict[str, object] = {"form": form}

@@ -24,6 +24,7 @@ class CandidateProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="candidate_profile",
     )
+    contact_email = models.EmailField(max_length=254)
     full_name = models.CharField(max_length=200)
     timezone = models.CharField(max_length=64, validators=[validate_iana_timezone])
     professional_title = models.CharField(max_length=200, blank=True)
@@ -40,6 +41,11 @@ class CandidateProfile(models.Model):
 
     def __str__(self) -> str:
         return self.full_name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and not self.contact_email:
+            self.contact_email = self.account.email
+        super().save(*args, **kwargs)
 
     @property
     def has_minimum_details(self) -> bool:

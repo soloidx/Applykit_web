@@ -43,6 +43,7 @@ class CandidateProfileForm(forms.ModelForm):
     class Meta:
         model = CandidateProfile
         fields = [
+            "contact_email",
             "full_name",
             "timezone",
             "professional_title",
@@ -53,6 +54,7 @@ class CandidateProfileForm(forms.ModelForm):
             "portfolio_url",
         ]
         labels = {
+            "contact_email": "Contact email",
             "full_name": "Full name",
             "timezone": "Timezone",
             "professional_title": "Professional title",

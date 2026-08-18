@@ -8,7 +8,7 @@ pytestmark = pytest.mark.integration
 @pytest.mark.django_db(transaction=True)
 def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_concepts() -> None:
     executor = MigrationExecutor(connection)
-    latest = [("profiles", "0012_remove_project_technologies")]
+    latest = [("profiles", "0013_candidateprofile_contact_email")]
     executor.migrate([("profiles", "0006_projectskill")])
 
     old_apps = executor.loader.project_state([("profiles", "0006_projectskill")]).apps
@@ -57,6 +57,7 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         executor.migrate(latest)
         new_apps = executor.loader.project_state(latest).apps
         ProfileSkill = new_apps.get_model("profiles", "ProfileSkill")
+        CandidateProfile = new_apps.get_model("profiles", "CandidateProfile")
         SkillConcept = new_apps.get_model("skills", "SkillConcept")
         SkillAlias = new_apps.get_model("skills", "SkillAlias")
         Project = new_apps.get_model("profiles", "Project")
@@ -68,6 +69,12 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
             ("PYTHON", 1),
         ]
         assert {skill.profile_id for skill in migrated} == {first_profile.pk, second_profile.pk}
+        assert (
+            CandidateProfile.objects.get(pk=first_profile.pk).contact_email == first_account.email
+        )
+        assert (
+            CandidateProfile.objects.get(pk=second_profile.pk).contact_email == second_account.email
+        )
         assert all(skill.concept_id is not None for skill in migrated)
         python_concept_id = SkillConcept.objects.get(canonical_key="python").pk
         legacy_collision_concept_id = SkillConcept.objects.get(canonical_key="ｐython").pk
