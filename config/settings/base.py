@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.campaigns",
     "apps.applications",
     "apps.skills",
+    "apps.cover_letters",
     "apps.core",
 ]
 
