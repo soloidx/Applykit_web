@@ -35,8 +35,10 @@ from apps.profiles.services import (
     create_experience_skill,
     create_profile_skill,
     create_project_skill,
+    delete_experience,
     delete_experience_skill,
     delete_profile_skill,
+    delete_project,
     delete_project_skill,
 )
 
@@ -277,10 +279,7 @@ def experience_delete(request: HttpRequest, experience_id: int) -> HttpResponse:
     experience = _experience_for_account(account, experience_id)
     if request.method != "POST":
         return HttpResponse(status=405)
-    profile = experience.profile
-    with transaction.atomic():
-        experience.delete()
-        _normalize_experience_positions(profile)
+    delete_experience(account=account, experience_id=experience.pk)
     return _redirect_or_htmx_redirect(request)
 
 
@@ -521,10 +520,7 @@ def project_delete(request: HttpRequest, project_id: int) -> HttpResponse:
     project = _project_for_account(account, project_id)
     if request.method != "POST":
         return HttpResponse(status=405)
-    with transaction.atomic():
-        profile = CandidateProfile.objects.select_for_update().get(pk=project.profile_id)
-        project.delete()
-        _normalize_project_positions(profile)
+    delete_project(account=account, project_id=project.pk)
     return _redirect_or_htmx_redirect(request)
 
 

@@ -21,7 +21,15 @@ from apps.profiles.models import (
     Project,
     ProjectSkill,
 )
-from apps.profiles.services import create_experience_skill, delete_experience_skill
+from apps.profiles.services import (
+    create_experience_skill,
+    create_profile_skill,
+    create_project_skill,
+    delete_experience,
+    delete_experience_skill,
+    delete_profile_skill,
+    delete_project,
+)
 from apps.resumes.forms import ResumeDraftForms, build_resume_forms
 from apps.resumes.models import (
     Resume,
@@ -33,7 +41,7 @@ from apps.resumes.models import (
     ResumeSection,
     ResumeSkill,
 )
-from apps.resumes.services import build_resume_default_draft, open_resume
+from apps.resumes.services import build_resume_default_draft, build_resume_document, open_resume
 from apps.skills.models import SkillConcept
 
 pytestmark = pytest.mark.integration
@@ -824,3 +832,283 @@ def test_profile_skill_service_appends_and_removes_resume_skill_at_final_source(
     assert ResumeSkill.objects.filter(resume=resume, concept=created.concept).count() == 1
     delete_experience_skill(account=account, experience_skill_id=created.pk)
     assert not ResumeSkill.objects.filter(resume=resume, concept=created.concept).exists()
+
+
+@pytest.mark.django_db
+def test_new_profile_skill_stays_available_but_absent_from_existing_resume() -> None:
+    account = verified_candidate("resume-profile-skill-live@example.com")
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+
+    created = create_profile_skill(account=account, label="Python")
+
+    assert not ResumeSkill.objects.filter(resume=resume, concept=created.concept).exists()
+    skill_form = next(
+        form
+        for form in build_resume_forms(resume=resume).skills.forms
+        if form.initial["source_id"] == created.concept_id
+    )
+    assert skill_form.initial["included"] is False
+
+
+@pytest.mark.django_db
+def test_experience_and_project_deletion_removes_only_stale_resume_skill_state() -> None:
+    account = verified_candidate("resume-source-delete-live@example.com")
+    profile = account.candidate_profile
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    project = Project.objects.create(profile=profile, name="Toolkit")
+    experience_concept = SkillConcept.objects.create(canonical_name="Python")
+    project_concept = SkillConcept.objects.create(canonical_name="Django")
+    ExperienceSkill.objects.create(
+        experience=experience,
+        concept=experience_concept,
+        label="Python",
+    )
+    ProjectSkill.objects.create(project=project, concept=project_concept, label="Django")
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+
+    delete_experience(account=account, experience_id=experience.pk)
+    delete_project(account=account, project_id=project.pk)
+
+    assert not Experience.objects.filter(pk=experience.pk).exists()
+    assert not Project.objects.filter(pk=project.pk).exists()
+    assert not ResumeExperience.objects.filter(resume=resume, experience_id=experience.pk).exists()
+    assert not ResumeProject.objects.filter(resume=resume, project_id=project.pk).exists()
+    assert not ResumeSkill.objects.filter(
+        resume=resume, concept_id__in=[experience_concept.pk, project_concept.pk]
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_new_highlights_flow_but_saved_exclusions_remain_sticky() -> None:
+    account = verified_candidate("resume-highlight-live@example.com")
+    experience = Experience.objects.create(
+        profile=account.candidate_profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    existing_highlight = Highlight.objects.create(experience=experience, text="Existing evidence.")
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+
+    payload = modern_resume_post(resume)
+    payload["highlights-0-included"] = ""
+    assert client.post(reverse("resume_save", args=[application.pk]), payload).status_code == 302
+
+    client.post(
+        reverse("highlight_create", args=[experience.pk]),
+        {"text": "New flowing evidence."},
+    )
+    document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    highlights = document.experiences[0]["highlights"]
+
+    assert [highlight["text"] for highlight in highlights] == ["New flowing evidence."]
+    assert existing_highlight.pk != highlights[0]["source"].pk
+
+
+@pytest.mark.django_db
+def test_skill_label_fallback_and_override_survive_association_removal() -> None:
+    account = verified_candidate("resume-skill-label-live@example.com")
+    profile = account.candidate_profile
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    profile_skill = ProfileSkill.objects.create(
+        profile=profile,
+        concept=concept,
+        label="Profile Python",
+    )
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    experience_skill = ExperienceSkill.objects.create(
+        experience=experience,
+        concept=concept,
+        label="Experience Python",
+    )
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    resume_skill = resume.skills.get(concept=concept)
+
+    delete_profile_skill(account=account, skill_id=profile_skill.pk)
+    document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    assert document.skills[0]["label"] == "Experience Python"
+
+    resume_skill.label_override = "Tailored Python"
+    resume_skill.save(update_fields=["label_override"])
+    document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    assert document.skills[0]["label"] == "Tailored Python"
+    delete_experience_skill(account=account, experience_skill_id=experience_skill.pk)
+
+    assert not ResumeSkill.objects.filter(pk=resume_skill.pk).exists()
+
+
+@pytest.mark.django_db
+def test_source_deletion_rolls_back_profile_and_resume_cleanup_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = verified_candidate("resume-source-delete-rollback@example.com")
+    experience = Experience.objects.create(
+        profile=account.candidate_profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    skill = ExperienceSkill.objects.create(
+        experience=experience,
+        concept=SkillConcept.objects.create(canonical_name="Python"),
+        label="Python",
+    )
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+
+    def fail_cleanup(*, account: Account, concept_id: int) -> None:
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(
+        "apps.resumes.services.remove_resume_skill_if_unreferenced",
+        fail_cleanup,
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        delete_experience(account=account, experience_id=experience.pk)
+
+    assert Experience.objects.filter(pk=experience.pk).exists()
+    assert ExperienceSkill.objects.filter(pk=skill.pk).exists()
+    assert ResumeExperience.objects.filter(resume=resume, experience=experience).exists()
+    assert ResumeSkill.objects.filter(resume=resume, concept=skill.concept).exists()
+
+
+@pytest.mark.django_db
+def test_new_project_skill_appends_without_reordering_or_recomputing_relevance() -> None:
+    account = verified_candidate("resume-project-skill-live@example.com")
+    profile = account.candidate_profile
+    existing_concept = SkillConcept.objects.create(canonical_name="Python")
+    new_concept = SkillConcept.objects.create(canonical_name="Django")
+    ProfileSkill.objects.create(profile=profile, concept=existing_concept, label="Python")
+    project = Project.objects.create(profile=profile, name="Toolkit")
+    application = application_for(account)
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=existing_concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    project_overlay = resume.projects.get(project=project)
+
+    created = create_project_skill(account=account, project_id=project.pk, label="Django")
+
+    assert resume.skills.get(concept=existing_concept).position == 0
+    assert resume.skills.get(concept=new_concept).position == 1
+    assert created.concept_id == new_concept.pk
+    project_overlay.refresh_from_db()
+    assert project_overlay.is_relevant is False
+
+
+@pytest.mark.django_db
+def test_requirement_changes_do_not_rewrite_saved_resume_structure_without_reset() -> None:
+    account = verified_candidate("resume-requirement-live@example.com")
+    profile = account.candidate_profile
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Saved role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    application = application_for(account)
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    experience_overlay = resume.experiences.get(experience=experience)
+    initial_position = experience_overlay.position
+    initial_relevance = experience_overlay.is_relevant
+
+    requirement.delete()
+    replacement = SkillConcept.objects.create(canonical_name="Django")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=replacement,
+        label="Django",
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    payload = modern_resume_post(Resume.objects.get(pk=resume.pk))
+    client = Client()
+    client.force_login(account)
+    assert client.post(reverse("resume_save", args=[application.pk]), payload).status_code == 302
+
+    experience_overlay.refresh_from_db()
+    assert experience_overlay.position == initial_position
+    assert experience_overlay.is_relevant is initial_relevance
+    assert ResumeSkill.objects.filter(resume=resume, concept=concept).exists()
+
+
+@pytest.mark.django_db
+def test_recreated_source_does_not_reconnect_deleted_resume_overlay() -> None:
+    account = verified_candidate("resume-recreated-source-live@example.com")
+    profile = account.candidate_profile
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Original role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    other_experience = Experience.objects.create(
+        profile=profile,
+        role="Other role",
+        organization="Example",
+        location="London",
+        start_date="2021-01-01",
+    )
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    other_overlay = resume.experiences.get(experience=other_experience)
+    other_overlay.role_override = "Other tailored role"
+    other_overlay.save(update_fields=["role_override"])
+
+    delete_experience(account=account, experience_id=experience.pk)
+    recreated = Experience.objects.create(
+        profile=profile,
+        role="Original role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+
+    assert not ResumeExperience.objects.filter(resume=resume, experience=recreated).exists()
+    assert ResumeExperience.objects.filter(
+        resume=resume,
+        experience=other_experience,
+        role_override="Other tailored role",
+    ).exists()
