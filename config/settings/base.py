@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.applications",
     "apps.skills",
     "apps.cover_letters",
+    "apps.resumes",
     "apps.core",
 ]
 
