@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,8 +10,13 @@ from apps.accounts.models import Account
 from apps.applications.models import ApplicationSkillRequirement, JobApplication
 from apps.profiles.models import (
     CandidateProfile,
+    Education,
+    Experience,
     ExperienceSkill,
+    Highlight,
+    Language,
     ProfileSkill,
+    Project,
     ProjectSkill,
 )
 from apps.resumes.models import (
@@ -407,21 +412,49 @@ def remove_resume_skill_if_unreferenced(*, account: Account, concept_id: int) ->
         ).delete()
 
 
-@transaction.atomic
-def save_resume_draft(
+def _contiguous(values: list[int], label: str) -> None:
+    if sorted(values) != list(range(len(values))):
+        raise ValidationError(f"{label} positions must be contiguous and unique.")
+
+
+def _source_map(model: Any, *, ids: set[int], profile: CandidateProfile) -> dict[int, Any]:
+    sources = model.objects.filter(pk__in=ids, profile=profile)
+    source_map = {source.pk: source for source in sources}
+    if set(source_map) != ids:
+        raise ValidationError("All submitted source records must belong to this Candidate Profile.")
+    return source_map
+
+
+def _validate_unique_ids(rows: list[dict[str, Any]], key: str) -> set[int]:
+    ids = [row[key] for row in rows]
+    if len(ids) != len(set(ids)):
+        raise ValidationError("Each source identity may appear only once.")
+    return set(ids)
+
+
+def _require_complete_ids(
+    rows: list[dict[str, Any]], *, key: str, expected: set[int], label: str
+) -> set[int]:
+    ids = _validate_unique_ids(rows, key)
+    if ids != expected:
+        raise ValidationError(f"Complete {label} source membership must be submitted.")
+    return ids
+
+
+def _save_canonical_resume_draft(
     *,
     account: Account,
     application_id: int,
     values: dict[str, Any],
 ) -> Resume:
-    resume = Resume.objects.select_for_update().get(
-        application__pk=application_id,
-        application__account=account,
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
     )
+    resume = Resume.objects.select_for_update().get(application=application)
     profile = CandidateProfile.objects.get(account=account)
-    submitted = set(values)
 
-    for field in (
+    expected_header = {
         "contact_email",
         "full_name",
         "professional_title",
@@ -430,32 +463,117 @@ def save_resume_draft(
         "location",
         "linkedin_url",
         "portfolio_url",
-    ):
-        setattr(resume, f"{field}_override", values.get(field) or None)
+    }
+    header = values.get("header")
+    if not isinstance(header, dict) or not expected_header.issubset(header):
+        raise ValidationError("A complete Resume header is required.")
+    for field in expected_header:
+        setattr(resume, f"{field}_override", header[field] or None)
 
-    sections = list(resume.sections.all())
-    for section in sections:
-        field = f"section_{section.kind}_position"
-        section.position = values[f"section_{section.kind}_position"]
+    sections = values.get("sections")
+    if not isinstance(sections, list):
+        raise ValidationError("A complete Resume section list is required.")
+    section_kinds = [section.get("kind") for section in sections]
+    if set(section_kinds) != set(SECTION_ORDER) or len(section_kinds) != len(SECTION_ORDER):
+        raise ValidationError("Resume sections must contain each section exactly once.")
+    _contiguous([section["position"] for section in sections], "Section")
+    existing_sections = {section.kind: section for section in resume.sections.all()}
+    for section_data in sections:
+        section = existing_sections.get(section_data["kind"])
+        if section is None:
+            section = ResumeSection.objects.create(resume=resume, kind=section_data["kind"])
+        section.position = section_data["position"]
         section.save(update_fields=["position"])
 
-    def update_items(items: list[Any], prefix: str, fields: tuple[str, ...]) -> None:
-        for item in items:
-            item_prefix = f"{prefix}_{item.pk}"
-            item.included = bool(values[f"{item_prefix}_included"])
-            item.position = values[f"{item_prefix}_position"]
-            for field in fields:
-                field_name = f"{item_prefix}_{field}"
-                setattr(item, field, values[field_name] or None)
-            item.save()
+    raw_rows = [
+        values.get("experiences"),
+        values.get("projects"),
+        values.get("educations"),
+        values.get("languages"),
+        values.get("skills"),
+    ]
+    if not all(isinstance(rows, list) for rows in raw_rows):
+        raise ValidationError("A complete Resume membership draft is required.")
+    experience_rows = cast(list[dict[str, Any]], raw_rows[0])
+    project_rows = cast(list[dict[str, Any]], raw_rows[1])
+    education_rows = cast(list[dict[str, Any]], raw_rows[2])
+    language_rows = cast(list[dict[str, Any]], raw_rows[3])
+    skill_rows = cast(list[dict[str, Any]], raw_rows[4])
 
-    experience_items = list(resume.experiences.select_related("experience").all())
-    if any(item.experience.profile_id != profile.pk for item in experience_items):
-        raise ValidationError("Resume experience sources must belong to this Candidate Profile.")
-    update_items(
-        experience_items,
-        "experience",
-        (
+    experience_ids = _require_complete_ids(
+        experience_rows,
+        key="source_id",
+        expected=set(profile.experiences.values_list("pk", flat=True)),
+        label="Experience",
+    )
+    project_ids = _require_complete_ids(
+        project_rows,
+        key="source_id",
+        expected=set(profile.projects.values_list("pk", flat=True)),
+        label="Project",
+    )
+    education_ids = _require_complete_ids(
+        education_rows,
+        key="source_id",
+        expected=set(profile.educations.values_list("pk", flat=True)),
+        label="Education",
+    )
+    language_ids = _require_complete_ids(
+        language_rows,
+        key="source_id",
+        expected=set(profile.languages.values_list("pk", flat=True)),
+        label="Language",
+    )
+    experience_sources = _source_map(Experience, ids=experience_ids, profile=profile)
+    project_sources = _source_map(Project, ids=project_ids, profile=profile)
+    education_sources = _source_map(Education, ids=education_ids, profile=profile)
+    language_sources = _source_map(Language, ids=language_ids, profile=profile)
+
+    for rows, label in (
+        (experience_rows, "Experience"),
+        (project_rows, "Project"),
+        (education_rows, "Education"),
+        (language_rows, "Language"),
+    ):
+        _contiguous([row["position"] for row in rows if row.get("included")], label)
+
+    def update_overlay(
+        *,
+        model: Any,
+        source_field: str,
+        source_map: dict[int, Any],
+        rows: list[dict[str, Any]],
+        fields: tuple[str, ...],
+    ) -> dict[int, Any]:
+        overlays = {
+            getattr(item, f"{source_field}_id"): item
+            for item in model.objects.filter(resume=resume)
+        }
+        model.objects.filter(resume=resume).exclude(
+            **{f"{source_field}_id__in": set(source_map)}
+        ).delete()
+        updated: dict[int, Any] = {}
+        for row in rows:
+            source_id = row["source_id"]
+            item = overlays.get(source_id)
+            if item is None:
+                if not row.get("included"):
+                    continue
+                item = model(resume=resume, **{source_field: source_map[source_id]})
+            item.included = bool(row.get("included"))
+            item.position = row["position"] if item.included else 0
+            for field in fields:
+                setattr(item, field, row.get(field) or None if item.included else None)
+            item.save()
+            updated[source_id] = item
+        return updated
+
+    experience_overlays = update_overlay(
+        model=ResumeExperience,
+        source_field="experience",
+        source_map=experience_sources,
+        rows=experience_rows,
+        fields=(
             "role_override",
             "organization_override",
             "location_override",
@@ -464,63 +582,146 @@ def save_resume_draft(
             "description_override",
         ),
     )
-    for item in experience_items:
-        overlay_highlights = {
-            highlight.highlight_id: highlight
-            for highlight in item.highlights.select_related("highlight").all()
+    update_overlay(
+        model=ResumeProject,
+        source_field="project",
+        source_map=project_sources,
+        rows=project_rows,
+        fields=("name_override", "description_override", "url_override"),
+    )
+    update_overlay(
+        model=ResumeEducation,
+        source_field="education",
+        source_map=education_sources,
+        rows=education_rows,
+        fields=(
+            "institution_override",
+            "degree_override",
+            "start_date_override",
+            "end_date_override",
+        ),
+    )
+    update_overlay(
+        model=ResumeLanguage,
+        source_field="language",
+        source_map=language_sources,
+        rows=language_rows,
+        fields=("name_override", "proficiency_override"),
+    )
+
+    raw_highlight_rows = values.get("highlights")
+    if not isinstance(raw_highlight_rows, list):
+        raise ValidationError("A complete Resume highlight list is required.")
+    highlight_rows = cast(list[dict[str, Any]], raw_highlight_rows)
+    highlight_keys = [(row["experience_id"], row["source_id"]) for row in highlight_rows]
+    if len(highlight_keys) != len(set(highlight_keys)):
+        raise ValidationError("Each highlight identity may appear only once per experience.")
+    expected_highlight_keys = set(
+        Highlight.objects.filter(experience__profile=profile).values_list("experience_id", "pk")
+    )
+    if set(highlight_keys) != expected_highlight_keys:
+        raise ValidationError("Complete Highlight source membership must be submitted.")
+    experience_highlights: dict[int, dict[int, Highlight]] = {}
+    for experience in experience_sources.values():
+        experience_highlights[experience.pk] = {
+            highlight.pk: highlight for highlight in experience.highlights.all()
         }
-        for highlight in item.experience.highlights.all():
-            prefix = f"highlight_{item.pk}_{highlight.pk}"
-            included_field = f"{prefix}_included"
-            position_field = f"{prefix}_position"
-            text_field = f"{prefix}_text_override"
-            if not {included_field, position_field, text_field}.intersection(submitted):
-                continue
-            included = bool(values.get(included_field, True))
-            position = values.get(position_field)
-            text_override = values.get(text_field) or None
-            existing = overlay_highlights.get(highlight.pk)
-            is_default = included and position == highlight.position and text_override is None
-            if is_default:
-                if existing is not None:
-                    existing.delete()
-                continue
-            if existing is None:
-                ResumeExperienceHighlight.objects.create(
-                    resume_experience=item,
-                    highlight=highlight,
-                    included=included,
-                    position=position,
-                    text_override=text_override,
-                )
-            else:
-                existing.included = included
-                existing.position = position
-                existing.text_override = text_override
-                existing.save()
+    for row in highlight_rows:
+        source_highlight = experience_highlights.get(row["experience_id"], {}).get(row["source_id"])
+        if source_highlight is None:
+            raise ValidationError("Submitted highlights must belong to their submitted Experience.")
+    submitted_highlight_keys = set(highlight_keys)
+    for overlay in ResumeExperienceHighlight.objects.filter(resume_experience__resume=resume):
+        key = (overlay.resume_experience.experience_id, overlay.highlight_id)
+        if key not in submitted_highlight_keys:
+            overlay.delete()
+    grouped_positions: dict[int, list[int]] = {}
+    for row in highlight_rows:
+        if row.get("included"):
+            grouped_positions.setdefault(row["experience_id"], []).append(row["position"])
+    for positions in grouped_positions.values():
+        _contiguous(positions, "Highlight")
+    for row in highlight_rows:
+        parent = experience_overlays.get(row["experience_id"])
+        if parent is None or not parent.included:
+            if parent is not None:
+                ResumeExperienceHighlight.objects.filter(resume_experience=parent).delete()
+            continue
+        existing = ResumeExperienceHighlight.objects.filter(
+            resume_experience=parent,
+            highlight_id=row["source_id"],
+        ).first()
+        included = bool(row.get("included")) and parent.included
+        position = row.get("position") if included else None
+        text_override = row.get("text_override") or None if included else None
+        source = experience_highlights[row["experience_id"]][row["source_id"]]
+        is_default = included and position == source.position and text_override is None
+        if is_default:
+            if existing is not None:
+                existing.delete()
+        elif existing is None:
+            ResumeExperienceHighlight.objects.create(
+                resume_experience=parent,
+                highlight=source,
+                included=included,
+                position=position,
+                text_override=text_override,
+            )
+        else:
+            existing.included = included
+            existing.position = position
+            existing.text_override = text_override
+            existing.save()
 
-    project_items = list(resume.projects.select_related("project").all())
-    if any(item.project.profile_id != profile.pk for item in project_items):
-        raise ValidationError("Resume project sources must belong to this Candidate Profile.")
-    update_items(
-        project_items, "project", ("name_override", "description_override", "url_override")
+    available_concepts = (
+        set(ProfileSkill.objects.filter(profile=profile).values_list("concept_id", flat=True))
+        | set(
+            ExperienceSkill.objects.filter(experience__profile=profile).values_list(
+                "concept_id", flat=True
+            )
+        )
+        | set(
+            ProjectSkill.objects.filter(project__profile=profile).values_list(
+                "concept_id", flat=True
+            )
+        )
     )
-
-    education_items = list(resume.educations.select_related("education").all())
-    if any(item.education.profile_id != profile.pk for item in education_items):
-        raise ValidationError("Resume education sources must belong to this Candidate Profile.")
-    update_items(
-        education_items,
-        "education",
-        ("institution_override", "degree_override", "start_date_override", "end_date_override"),
+    concept_ids = _require_complete_ids(
+        skill_rows,
+        key="source_id",
+        expected=available_concepts,
+        label="Skill",
     )
-
-    language_items = list(resume.languages.select_related("language").all())
-    if any(item.language.profile_id != profile.pk for item in language_items):
-        raise ValidationError("Resume language sources must belong to this Candidate Profile.")
-    update_items(language_items, "language", ("name_override", "proficiency_override"))
-    update_items(list(resume.skills.all()), "skill", ("label_override",))
+    if not concept_ids.issubset(available_concepts):
+        raise ValidationError("Submitted skills must belong to this Candidate Profile.")
+    _contiguous([row["position"] for row in skill_rows if row.get("included")], "Skill")
+    skill_overlays = {item.concept_id: item for item in resume.skills.all()}
+    ResumeSkill.objects.filter(resume=resume).exclude(concept_id__in=concept_ids).delete()
+    for row in skill_rows:
+        item = skill_overlays.get(row["source_id"])
+        if item is None:
+            if not row.get("included"):
+                continue
+            item = ResumeSkill.objects.create(resume=resume, concept_id=row["source_id"])
+        item.included = bool(row.get("included"))
+        item.position = row["position"] if item.included else 0
+        item.label_override = row.get("label_override") or None if item.included else None
+        item.save()
 
     resume.full_clean(exclude=["application"])
     resume.save()
     return resume
+
+
+@transaction.atomic
+def save_resume_draft(
+    *,
+    account: Account,
+    application_id: int,
+    values: dict[str, Any],
+) -> Resume:
+    return _save_canonical_resume_draft(
+        account=account,
+        application_id=application_id,
+        values=values,
+    )

@@ -33,12 +33,35 @@
     <aside class="h-fit rounded-[2rem] border border-ink/10 bg-cream p-6">
       <h2 class="font-display text-2xl font-semibold">Tailor resume</h2>
       <p class="mt-2 text-sm text-ink/65">Blank override fields inherit the current Candidate Profile.</p>
-      <form class="mt-6 grid gap-4" method="post" action="{% url 'resume_save' application.pk %}">
-        {% csrf_token %}
-        {{ form.non_field_errors }}
-        {% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
-        <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">Save Resume</button>
-      </form>
+        <form class="mt-6 grid gap-4" method="post" action="{% url 'resume_save' application.pk %}">
+          {% csrf_token %}
+          {% if draft_forms %}
+          {{ draft_forms.header.non_field_errors }}
+          {% for field in draft_forms.header %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}
+          {{ draft_forms.sections.management_form }}
+          {{ draft_forms.sections.non_form_errors }}
+          {% for form in draft_forms.sections %}{% for field in form %}{{ field }}{{ field.errors }}{% endfor %}{% endfor %}
+          {{ draft_forms.experiences.management_form }}
+          {{ draft_forms.experiences.non_form_errors }}
+          {% for form in draft_forms.experiences %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
+          {{ draft_forms.highlights.management_form }}
+          {{ draft_forms.highlights.non_form_errors }}
+          {% for form in draft_forms.highlights %}{% for field in form %}{{ field }}{{ field.errors }}{% endfor %}{% endfor %}
+          {{ draft_forms.projects.management_form }}
+          {{ draft_forms.projects.non_form_errors }}
+          {% for form in draft_forms.projects %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
+          {{ draft_forms.educations.management_form }}
+          {{ draft_forms.educations.non_form_errors }}
+          {% for form in draft_forms.educations %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
+          {{ draft_forms.languages.management_form }}
+          {{ draft_forms.languages.non_form_errors }}
+          {% for form in draft_forms.languages %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
+          {{ draft_forms.skills.management_form }}
+          {{ draft_forms.skills.non_form_errors }}
+          {% for form in draft_forms.skills %}{% for field in form %}<div><label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}{% endfor %}
+          {% endif %}
+          <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">Save Resume</button>
+        </form>
     </aside>
   </div>
 </section>

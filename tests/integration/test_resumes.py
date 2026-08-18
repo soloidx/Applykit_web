@@ -22,7 +22,7 @@ from apps.profiles.models import (
     ProjectSkill,
 )
 from apps.profiles.services import create_experience_skill, delete_experience_skill
-from apps.resumes.forms import ResumeDraftForm
+from apps.resumes.forms import build_resume_forms
 from apps.resumes.models import (
     Resume,
     ResumeEducation,
@@ -112,6 +112,43 @@ def profile_sources(account: Account) -> dict[str, object]:
 
 def resume_for(account: Account) -> Resume:
     return Resume.objects.create(application=application_for(account))
+
+
+def modern_resume_post(resume: Resume) -> dict[str, object]:
+    draft_forms = build_resume_forms(resume=resume)
+    data: dict[str, object] = {}
+    for name, form in (("header", draft_forms.header),):
+        for field_name, _field in form.fields.items():
+            value = form.initial.get(field_name, "")
+            if isinstance(value, bool):
+                if value:
+                    data[f"{name}-{field_name}"] = "on"
+            else:
+                data[f"{name}-{field_name}"] = value if value is not None else ""
+
+    formsets = (
+        ("sections", draft_forms.sections),
+        ("experiences", draft_forms.experiences),
+        ("highlights", draft_forms.highlights),
+        ("projects", draft_forms.projects),
+        ("educations", draft_forms.educations),
+        ("languages", draft_forms.languages),
+        ("skills", draft_forms.skills),
+    )
+    for prefix, formset in formsets:
+        data[f"{prefix}-TOTAL_FORMS"] = str(len(formset.forms))
+        data[f"{prefix}-INITIAL_FORMS"] = str(len(formset.forms))
+        data[f"{prefix}-MIN_NUM_FORMS"] = "0"
+        data[f"{prefix}-MAX_NUM_FORMS"] = str(len(formset.forms))
+        for index, form in enumerate(formset.forms):
+            for field_name, _field in form.fields.items():
+                value = form.initial.get(field_name, "")
+                if isinstance(value, bool):
+                    if value:
+                        data[f"{prefix}-{index}-{field_name}"] = "on"
+                else:
+                    data[f"{prefix}-{index}-{field_name}"] = value if value is not None else ""
+    return data
 
 
 @pytest.mark.django_db
@@ -459,13 +496,9 @@ def test_resume_detail_is_account_scoped_and_renders_live_profile_header() -> No
     assert b"Resume" in response.content
 
     resume = Resume.objects.get(application=application)
-    draft_form = ResumeDraftForm(resume=resume)
-    draft = {
-        name: field.initial
-        for name, field in draft_form.fields.items()
-        if field.required and field.initial is not None
-    }
-    draft["full_name"] = "Tailored Ada Lovelace"
+    draft = modern_resume_post(resume)
+    draft["header-full_name"] = "Tailored Ada Lovelace"
+    draft.pop("header-full_name_inherit", None)
     saved = client.post(
         reverse("resume_save", args=[application.pk]),
         draft,
@@ -484,6 +517,159 @@ def test_resume_detail_is_account_scoped_and_renders_live_profile_header() -> No
     private_response = client.get(reverse("resume_detail", args=[application.pk]))
 
     assert private_response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_typed_resume_save_inherits_independently_and_blank_resets() -> None:
+    account = verified_candidate("resume-typed-save@example.com")
+    sources = profile_sources(account)
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+
+    tailored = modern_resume_post(resume)
+    tailored["header-full_name"] = "Tailored Ada"
+    tailored.pop("header-full_name_inherit", None)
+    experience_index = next(
+        index
+        for index, form in enumerate(build_resume_forms(resume=resume).experiences.forms)
+        if form.initial["source_id"] == sources["experience"].pk
+    )
+    tailored[f"experiences-{experience_index}-role_override"] = "Tailored role"
+    tailored.pop(f"experiences-{experience_index}-role_override_inherit", None)
+    response = client.post(reverse("resume_save", args=[application.pk]), tailored)
+
+    assert response.status_code == 302
+    resume.refresh_from_db()
+    assert resume.full_name_override == "Tailored Ada"
+    assert resume.professional_summary_override is None
+
+    account.candidate_profile.full_name = "Updated Ada"
+    account.candidate_profile.professional_summary = "A current summary."
+    account.candidate_profile.save(
+        update_fields=["full_name", "professional_summary", "updated_at"]
+    )
+    rendered = client.get(reverse("resume_detail", args=[application.pk]))
+    assert b"Tailored Ada" in rendered.content
+    assert b"A current summary." in rendered.content
+    assert b"Tailored role" in rendered.content
+
+    reset = modern_resume_post(resume)
+    reset["header-full_name"] = ""
+    reset.pop("header-full_name_inherit", None)
+    reset[f"experiences-{experience_index}-role_override"] = ""
+    reset.pop(f"experiences-{experience_index}-role_override_inherit", None)
+    reset_response = client.post(reverse("resume_save", args=[application.pk]), reset)
+
+    assert reset_response.status_code == 302
+    assert Resume.objects.get(pk=resume.pk).full_name_override is None
+    assert ResumeExperience.objects.get(pk=resume.experiences.first().pk).role_override is None
+
+
+@pytest.mark.django_db
+def test_typed_resume_save_rejects_foreign_source_and_rolls_back() -> None:
+    owner = verified_candidate("resume-typed-owner@example.com")
+    intruder = verified_candidate("resume-typed-intruder@example.com")
+    owner_experience = Experience.objects.create(
+        profile=owner.candidate_profile,
+        role="Owner role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    intruder_experience = Experience.objects.create(
+        profile=intruder.candidate_profile,
+        role="Private role",
+        organization="Secret",
+        location="Paris",
+        start_date="2020-01-01",
+    )
+    application = application_for(owner)
+    resume, _created = open_resume(account=owner, application_id=application.pk)
+    client = Client()
+    client.force_login(owner)
+    payload = modern_resume_post(resume)
+    experience_index = next(
+        index
+        for index, form in enumerate(build_resume_forms(resume=resume).experiences.forms)
+        if form.initial["source_id"] == owner_experience.pk
+    )
+    payload[f"experiences-{experience_index}-source_id"] = str(intruder_experience.pk)
+    payload["header-full_name"] = "Must not persist"
+    payload.pop("header-full_name_inherit", None)
+
+    response = client.post(reverse("resume_save", args=[application.pk]), payload)
+
+    assert response.status_code == 200
+    assert b"Candidate Profile" in response.content
+    assert Resume.objects.get(pk=resume.pk).full_name_override is None
+    assert ResumeExperience.objects.get(resume=resume, experience=owner_experience).included is True
+
+
+@pytest.mark.django_db
+def test_typed_resume_save_preserves_bound_draft_when_persistence_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account = verified_candidate("resume-typed-failure@example.com")
+    experience = Experience.objects.create(
+        profile=account.candidate_profile,
+        role="Source role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    payload = modern_resume_post(resume)
+    payload["header-full_name"] = "Retryable draft"
+    payload.pop("header-full_name_inherit", None)
+    payload["sections-0-position"] = "1"
+    payload["sections-1-position"] = "0"
+    experience_index = next(
+        index
+        for index, form in enumerate(build_resume_forms(resume=resume).experiences.forms)
+        if form.initial["source_id"] == experience.pk
+    )
+    payload[f"experiences-{experience_index}-role_override"] = "Retryable role"
+    payload.pop(f"experiences-{experience_index}-role_override_inherit", None)
+
+    def fail_save(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(Resume, "save", fail_save)
+    client = Client()
+    client.force_login(account)
+
+    response = client.post(reverse("resume_save", args=[application.pk]), payload)
+
+    assert response.status_code == 200
+    assert b"Save failed" in response.content
+    assert b"Retryable draft" in response.content
+    assert b"Retryable role" in response.content
+    assert Resume.objects.get(pk=resume.pk).full_name_override is None
+    assert ResumeSection.objects.get(resume=resume, kind=ResumeSection.Kind.SUMMARY).position == 0
+    assert ResumeExperience.objects.get(resume=resume, experience=experience).role_override is None
+
+
+@pytest.mark.django_db
+def test_resume_save_methods_and_htmx_redirect() -> None:
+    account = verified_candidate("resume-methods@example.com")
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    payload = modern_resume_post(resume)
+    client = Client()
+    client.force_login(account)
+
+    assert client.get(reverse("resume_save", args=[application.pk])).status_code == 405
+    response = client.post(
+        reverse("resume_save", args=[application.pk]),
+        payload,
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == reverse("resume_detail", args=[application.pk])
 
 
 @pytest.mark.django_db

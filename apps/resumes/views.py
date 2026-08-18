@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import cast
 
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -12,7 +11,10 @@ from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
 from apps.applications.models import JobApplication
 from apps.profiles.models import CandidateProfile
-from apps.resumes.forms import ResumeDraftForm
+from apps.resumes.forms import (
+    ResumeDraftForms,
+    build_resume_forms,
+)
 from apps.resumes.models import Resume
 from apps.resumes.services import build_resume_document, open_resume, save_resume_draft
 
@@ -21,7 +23,7 @@ def _render_resume(
     request: HttpRequest,
     account: Account,
     resume: Resume,
-    form: ResumeDraftForm,
+    draft_forms: ResumeDraftForms,
 ) -> HttpResponse:
     resume.refresh_from_db()
     document = build_resume_document(account=account, resume=resume)
@@ -31,18 +33,8 @@ def _render_resume(
         {
             "application": resume.application,
             "document": document,
-            "form": form,
+            "draft_forms": draft_forms,
         },
-    )
-
-
-def _header_form(resume: Resume) -> ResumeDraftForm:
-    return ResumeDraftForm(
-        initial={
-            field: getattr(resume, f"{field}_override") or ""
-            for field in ResumeDraftForm.base_fields
-        },
-        resume=resume,
     )
 
 
@@ -57,7 +49,7 @@ def resume_detail(request: HttpRequest, application_id: int) -> HttpResponse:
     except JobApplication.DoesNotExist, CandidateProfile.DoesNotExist:
         return HttpResponse(status=404)
 
-    return _render_resume(request, account, resume, _header_form(resume))
+    return _render_resume(request, account, resume, draft_forms=build_resume_forms(resume=resume))
 
 
 @login_required
@@ -74,16 +66,18 @@ def resume_save(request: HttpRequest, application_id: int) -> HttpResponse:
     except Resume.DoesNotExist:
         return HttpResponse(status=404)
 
-    form = ResumeDraftForm(request.POST, resume=resume)
-    if form.is_valid():
+    draft_forms = build_resume_forms(resume=resume, data=request.POST)
+    is_valid = draft_forms.is_valid()
+    if is_valid:
         try:
             save_resume_draft(
                 account=account,
                 application_id=application_id,
-                values=form.cleaned_data,
+                values=draft_forms.as_draft(),
             )
-        except ValidationError as error:
-            form.add_error(None, error)
+        except Exception as error:
+            message = f"Save failed: {error}"
+            draft_forms.header.add_error(None, message)
         else:
             destination = reverse("resume_detail", args=[application_id])
             if request.headers.get("HX-Request") == "true":
@@ -91,4 +85,4 @@ def resume_save(request: HttpRequest, application_id: int) -> HttpResponse:
                 response["HX-Redirect"] = destination
                 return response
             return redirect(destination)
-    return _render_resume(request, account, resume, form)
+    return _render_resume(request, account, resume, draft_forms)
