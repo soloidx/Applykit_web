@@ -4,7 +4,7 @@
 {% block title %}Resume | {{ application.role_title }} | ApplyKit{% endblock %}
 
 {% block content %}
-<div class="min-h-screen pb-20" data-resume-workbench>
+<div class="min-h-screen pb-20" data-document-workbench data-workbench-kind="resume" data-resume-workbench data-save-state="{% if save_failed %}failed{% elif reset_pending %}dirty{% else %}clean{% endif %}">
   <header class="border-b border-ink/10 bg-cream/80">
     <div class="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
       <div>
@@ -16,7 +16,7 @@
         <p class="mt-2 text-sm text-ink/60">{{ application.company.name }} · Changes stay local until Save Resume.</p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if reset_pending or save_failed %}Unsaved changes{% else %}Saved{% endif %}</p>
+        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if save_failed %}Save failed{% elif reset_pending %}Unsaved changes{% else %}Saved{% endif %}</p>
         <a class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold hover:border-coral hover:text-coral" href="{% url 'resume_detail' application.pk %}?reset=confirm" data-action="reset-resume">Reset Resume</a>
         <button class="rounded-full bg-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink" type="submit" form="resume-form">Save Resume</button>
       </div>
@@ -63,7 +63,7 @@
       </details>
     </aside>
 
-    <form id="resume-form" class="min-w-0 rounded-[2rem] border border-ink/10 bg-white p-5 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-8 lg:p-10" method="post" action="{% url 'resume_save' application.pk %}" data-dirty="{% if reset_pending or save_failed %}true{% else %}false{% endif %}">
+    <form id="resume-form" data-workbench-form class="min-w-0 rounded-[2rem] border border-ink/10 bg-white p-5 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-8 lg:p-10" method="post" action="{% url 'resume_save' application.pk %}" data-dirty="{% if reset_pending or save_failed %}true{% else %}false{% endif %}">
       {% csrf_token %}
       <input type="hidden" name="reset_resume_draft" value="{% if reset_pending %}1{% else %}0{% endif %}" data-reset-flag>
       <input type="hidden" name="reset_scope" value="{% if reset_pending %}all{% endif %}" data-reset-scope>
@@ -120,154 +120,14 @@
   </main>
 
   <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="reset-resume-title" data-reset-dialog>
-    <div class="p-6"><h2 id="reset-resume-title" class="font-display text-2xl font-semibold">Reset this Resume?</h2><p class="mt-3 text-sm leading-6 text-ink/70">This replaces the local draft with current Candidate Profile content and current job requirements. Tailoring, hidden records, and custom order will remain unchanged in the saved Resume until you choose Save Resume.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel">Cancel</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="confirm">Reset locally</button></form></div>
+    <div class="p-6"><h2 id="reset-resume-title" class="font-display text-2xl font-semibold">Reset this Resume?</h2><p class="mt-3 text-sm leading-6 text-ink/70">This replaces the current local draft with Candidate Profile content and current job requirements, discarding local tailoring, hidden records, and custom order. Your saved Resume is unchanged until you choose Save Resume.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel" data-safe-focus>Cancel</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="confirm">Reset locally</button></form></div>
   </dialog>
   <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="discard-resume-title" data-exit-dialog>
-    <div class="p-6"><h2 id="discard-resume-title" class="font-display text-2xl font-semibold">Discard unsaved changes?</h2><p class="mt-3 text-sm leading-6 text-ink/70">Your local Resume draft has not been saved. Keep editing or discard these changes and leave the workbench.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel">Keep editing</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="confirm">Discard changes</button></form></div>
+    <div class="p-6"><h2 id="discard-resume-title" class="font-display text-2xl font-semibold">Discard unsaved changes?</h2><p class="mt-3 text-sm leading-6 text-ink/70">Your local Resume draft has not been saved. Keep editing or discard these changes and leave the workbench.</p><form class="mt-6 flex justify-end gap-3" method="dialog"><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" value="cancel" data-safe-focus>Keep editing</button><button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" value="discard">Discard changes</button></form></div>
   </dialog>
   <noscript><p class="mx-auto max-w-7xl px-5 pb-8 text-sm text-ink/60 sm:px-8">Reset controls require JavaScript confirmation; native field, inclusion, ordering, and Save Resume controls remain available.</p></noscript>
   {{ default_draft|json_script:"resume-default-draft" }}
   {{ baseline_snapshot|json_script:"resume-baseline" }}
 </div>
 
-<script>
-(() => {
-  const root = document.querySelector("[data-resume-workbench]");
-  if (!root) return;
-  const form = root.querySelector("#resume-form");
-  const defaults = JSON.parse(document.getElementById("resume-default-draft").textContent);
-  const status = root.querySelector("[data-save-status]");
-  const sets = ["experiences", "projects", "educations", "languages", "skills"];
-  const input = (scope, name) => scope.querySelector(`[name="${name}"]`) || scope.querySelector(`[name$="-${name}"]`);
-  const setValue = (scope, name, value, inherit) => {
-    const field = input(scope, name);
-    if (!field) return;
-    if (field.type === "checkbox") field.checked = Boolean(value);
-    else field.value = value ?? "";
-    const inheritField = input(scope, `${name}_inherit`);
-    if (inheritField) inheritField.checked = inherit;
-  };
-  const applyRow = (scope, row, preserveStructure) => {
-    const included = input(scope, "included");
-    const position = input(scope, "position");
-    const oldIncluded = included && included.checked;
-    const oldPosition = position && position.value;
-    Object.entries(row).forEach(([name, value]) => {
-      if (["source_id", "experience_id", "included", "position"].includes(name)) return;
-      setValue(scope, name, value, true);
-    });
-    if (!preserveStructure) {
-      setValue(scope, "included", true, false);
-      setValue(scope, "position", row.position, false);
-    } else {
-      setValue(scope, "included", oldIncluded, false);
-      setValue(scope, "position", oldPosition, false);
-    }
-  };
-  const defaultRow = (name, sourceId, experienceId) => defaults[name].find(row => String(row.source_id) === String(sourceId) && (!experienceId || String(row.experience_id) === String(experienceId)));
-  const resetField = (button) => {
-    const fieldName = button.dataset.field;
-    const scope = button.closest("[data-formset]") || form;
-    let value = defaults.header[fieldName];
-    if (scope !== form) {
-      const row = defaultRow(scope.dataset.formset, scope.dataset.sourceId, scope.dataset.experienceId);
-      value = row && row[fieldName];
-    }
-    setValue(scope, fieldName, value, true);
-    updateDirty();
-  };
-  const resetItem = (button) => {
-    const scope = button.closest("[data-formset]");
-    const row = defaultRow(scope.dataset.formset, scope.dataset.sourceId, scope.dataset.experienceId);
-    if (row) applyRow(scope, row, true);
-    if (scope.dataset.formset === "experiences") {
-      form.querySelectorAll(`[data-highlight-experience="${scope.dataset.sourceId}"]`).forEach(highlight => {
-        const highlightRow = defaults.highlights.find(item => String(item.experience_id) === scope.dataset.sourceId && String(item.source_id) === highlight.dataset.sourceId);
-        if (highlightRow) applyRow(highlight, highlightRow, false);
-      });
-    }
-    updateDirty();
-  };
-  const resetSection = (section) => {
-    const kind = section.dataset.sectionKind;
-    if (kind === "experience" || kind === "projects") input(form, "reset_scope").value = kind;
-    if (kind === "summary") Object.entries(defaults.header).forEach(([name, value]) => setValue(form, name, value, true));
-    const names = kind === "experience" ? ["experiences", "highlights"] : kind === "projects" ? ["projects"] : kind === "education" ? ["educations"] : kind === "languages" ? ["languages"] : kind === "skills" ? ["skills"] : [];
-    names.forEach(name => {
-      form.querySelectorAll(`[data-formset="${name}"]`).forEach(scope => {
-        const sourceId = scope.dataset.sourceId;
-        const row = name === "highlights" ? defaults.highlights.find(item => String(item.source_id) === sourceId && String(item.experience_id) === scope.dataset.experienceId) : defaultRow(name, sourceId);
-        if (row) applyRow(scope, row, false);
-      });
-    });
-    updateDirty();
-  };
-  const resetResume = () => {
-    input(form, "reset_resume_draft").value = "1";
-    input(form, "reset_scope").value = "all";
-    Object.entries(defaults.header).forEach(([name, value]) => setValue(form, name, value, true));
-    form.querySelectorAll("[data-section-row]").forEach(scope => {
-      const row = defaults.sections.find(item => item.kind === scope.dataset.sectionKind);
-      if (row) setValue(scope, "position", row.position, false);
-    });
-    sets.forEach(name => form.querySelectorAll(`[data-formset="${name}"]`).forEach(scope => {
-      const row = defaultRow(name, scope.dataset.sourceId);
-      if (row) applyRow(scope, row, false);
-    }));
-    form.querySelectorAll('[data-formset="highlights"]').forEach(scope => {
-      const row = defaults.highlights.find(item => String(item.source_id) === scope.dataset.sourceId && String(item.experience_id) === scope.dataset.experienceId);
-      if (row) applyRow(scope, row, false);
-    });
-    updateDirty();
-  };
-  root.addEventListener("click", event => {
-    const button = event.target.closest("[data-action]");
-    if (!button) return;
-    if (button.dataset.action === "reset-resume") {
-      event.preventDefault();
-      const dialog = root.querySelector("[data-reset-dialog]");
-      if (dialog.showModal) dialog.showModal(); else if (window.confirm("Reset this local Resume draft?")) resetResume();
-    }
-    if (button.dataset.action === "back" && form.dataset.dirty === "true") {
-      event.preventDefault();
-      const dialog = root.querySelector("[data-exit-dialog]");
-      dialog.dataset.href = button.href;
-      if (dialog.showModal) dialog.showModal(); else if (window.confirm("Discard unsaved Resume changes?")) window.location.assign(button.href);
-    }
-    if (button.dataset.action === "reset-field") resetField(button);
-    if (button.dataset.action === "reset-item") resetItem(button);
-    if (button.dataset.action === "reset-section") resetSection(button.closest("[data-section-kind]"));
-  });
-  root.querySelector("[data-reset-dialog]")?.addEventListener("close", event => {
-    if (event.target.returnValue === "confirm") resetResume();
-  });
-  root.querySelector("[data-exit-dialog]")?.addEventListener("close", event => {
-    if (event.target.returnValue === "confirm") window.location.assign(event.target.dataset.href);
-  });
-  const snapshot = () => [...form.elements]
-    .filter(control => control.name)
-    .map(control => `${control.name}=${control.type === "checkbox" ? (control.checked ? "1" : "0") : control.value}`)
-    .sort()
-    .join("&");
-  let baseline = JSON.parse(document.getElementById("resume-baseline").textContent);
-  const updateDirty = () => {
-    const dirty = snapshot() !== baseline;
-    form.dataset.dirty = String(dirty);
-    status.textContent = dirty ? "Unsaved changes" : "Saved";
-    status.classList.toggle("text-coral", dirty);
-  };
-  form.addEventListener("input", updateDirty);
-  form.addEventListener("change", updateDirty);
-  form.addEventListener("submit", event => {
-    if (form.dataset.saving === "true") { event.preventDefault(); return; }
-    form.dataset.saving = "true";
-    status.textContent = "Saving...";
-    status.classList.remove("text-coral");
-    setTimeout(() => form.querySelectorAll("button, input, textarea, select").forEach(control => { control.disabled = true; }), 0);
-  });
-  window.addEventListener("beforeunload", event => {
-    if (form.dataset.dirty === "true") { event.preventDefault(); event.returnValue = ""; }
-  });
-})();
-</script>
 {% endblock %}

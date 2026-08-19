@@ -5,7 +5,7 @@
 
 {% block content %}
 {% if editor_open %}<link rel="stylesheet" href="{% static 'vendor/quill/quill.snow.css' %}">{% endif %}
-<div class="min-h-screen pb-20" data-cover-letter-workbench data-dirty="{% if editor_dirty %}true{% else %}false{% endif %}">
+<div class="min-h-screen pb-20" data-document-workbench data-workbench-kind="cover-letter" data-cover-letter-workbench data-save-state="{% if save_failed %}failed{% elif editor_dirty %}dirty{% else %}clean{% endif %}" data-dirty="{% if editor_dirty %}true{% else %}false{% endif %}">
   <header class="border-b border-ink/10 bg-cream/80">
     <div class="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
       <div>
@@ -18,7 +18,7 @@
       </div>
       {% if editor_open %}
       <div class="flex flex-wrap items-center gap-3">
-        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if editor_dirty or save_failed %}Unsaved changes{% else %}Saved{% endif %}</p>
+        <p class="text-sm font-semibold text-ink/55" aria-live="polite" data-save-status>{% if save_failed %}Save failed{% elif editor_dirty %}Unsaved changes{% else %}Saved{% endif %}</p>
         <button class="rounded-full bg-coral px-5 py-2.5 text-sm font-semibold text-white hover:bg-ink" type="submit" form="cover-letter-form">Save letter</button>
       </div>
       {% endif %}
@@ -68,7 +68,7 @@
         {% endif %}
       </div>
       {% if save_failed %}<div class="mt-5 rounded-xl bg-coral/10 p-4 text-sm" role="alert">Save failed. Your complete draft is preserved for correction or retry.</div>{% endif %}
-      <form id="cover-letter-form" class="mt-6" method="post" action="{% url 'cover_letter_save' application.pk %}">
+      <form id="cover-letter-form" data-workbench-form class="mt-6" method="post" action="{% url 'cover_letter_save' application.pk %}">
         {% csrf_token %}
         {{ cover_letter_form.non_field_errors }}
         <div class="cover-letter-editor" data-editor>
@@ -93,12 +93,12 @@
       <dialog class="max-w-md rounded-3xl border border-ink/10 bg-cream p-0 shadow-2xl" aria-labelledby="delete-cover-letter-title" data-delete-dialog>
         <div class="p-6">
           <h2 id="delete-cover-letter-title" class="font-display text-2xl font-semibold">Delete this Cover Letter?</h2>
-          <p class="mt-3 text-sm leading-6 text-ink/70" data-delete-copy>Saved content and any unsaved edits will be discarded.</p>
+          <p class="mt-3 text-sm leading-6 text-ink/70" data-delete-copy>This permanently deletes the saved Cover Letter and discards any current unsaved draft.</p>
           <form class="mt-6 flex justify-end gap-3" method="post" action="{% url 'cover_letter_delete' application.pk %}" data-delete-form>
             {% csrf_token %}
             <input type="hidden" name="confirm" value="1">
             <input type="hidden" name="dirty" value="0" data-delete-dirty>
-            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-action="cancel-delete">Cancel</button>
+            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-action="cancel-delete" data-safe-focus>Cancel</button>
             <button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" type="submit">Delete permanently</button>
           </form>
         </div>
@@ -109,7 +109,7 @@
           <h2 id="discard-cover-letter-title" class="font-display text-2xl font-semibold">Discard unsaved changes?</h2>
           <p class="mt-3 text-sm leading-6 text-ink/70">Your local Cover Letter draft has not been saved.</p>
           <form class="mt-6 flex justify-end gap-3" method="dialog">
-            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="submit" value="cancel">Keep editing</button>
+            <button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="submit" value="cancel" data-safe-focus>Keep editing</button>
             <button class="rounded-full bg-coral px-4 py-2 text-sm font-semibold text-white" type="submit" value="discard">Discard changes</button>
           </form>
         </div>
@@ -122,5 +122,4 @@
   {{ baseline_body|json_script:"cover-letter-baseline" }}
 </div>
 {% if editor_open %}<script src="{% static 'vendor/quill/quill.min.js' %}"></script>{% endif %}
-<script src="{% static 'js/cover_letter_editor.js' %}"></script>
 {% endblock %}

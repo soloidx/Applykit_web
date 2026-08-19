@@ -25,7 +25,7 @@ from apps.resumes.services import (
 
 
 def _form_snapshot(draft_forms: ResumeDraftForms) -> str:
-    values: list[str] = []
+    values: dict[str, str] = {}
     for formset in (
         draft_forms.header,
         draft_forms.sections,
@@ -42,8 +42,22 @@ def _form_snapshot(draft_forms: ResumeDraftForms) -> str:
                 value = form.initial.get(field.name, "")
                 if isinstance(value, bool):
                     value = "1" if value else "0"
-                values.append(f"{field.html_name}={value or ''}")
-    return "&".join(sorted(values))
+                values[field.html_name] = (
+                    str("" if value is None else value)
+                    .replace("\r\n", "\n")
+                    .replace("\r", "\n")
+                    .strip()
+                )
+    for name, value in list(values.items()):
+        if not name.endswith("_inherit"):
+            continue
+        value_name = name.removesuffix("_inherit")
+        if value_name in values and (value == "1" or not values[value_name]):
+            values[value_name] = ""
+            values[name] = "1"
+        elif value in {"True", "False"}:
+            values[name] = "1" if value == "True" else "0"
+    return "&".join(f"{name}={values[name]}" for name in sorted(values))
 
 
 def _render_resume(

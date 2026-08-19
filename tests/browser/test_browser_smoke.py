@@ -9,6 +9,7 @@ from django.urls import reverse
 from apps.accounts.models import Account
 from apps.applications.models import Company, JobApplication, RecruitmentEvent
 from apps.campaigns.models import Campaign
+from apps.cover_letters.models import CoverLetter
 from apps.profiles.models import CandidateProfile
 
 # pytest-playwright starts its sync API from an async-managed fixture context.
@@ -310,3 +311,183 @@ def test_candidate_can_cancel_and_confirm_account_deletion_in_browser(page, live
         "heading", name="Turn a scattered search into a focused campaign."
     ).is_visible()
     assert page.get_by_role("link", name="Sign in").is_visible()
+
+
+def _document_candidate(email: str) -> tuple[Account, JobApplication]:
+    account = Account.objects.create_user(email, "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    CandidateProfile.objects.create(
+        account=account,
+        full_name="Ada Lovelace",
+        timezone="Europe/London",
+    )
+    campaign = Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="Europe/London",
+    )
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=Company.objects.create(name="Example Careers"),
+        role_title="Platform engineer",
+        job_description="Build dependable internal systems.",
+    )
+    return account, application
+
+
+@pytest.mark.django_db
+def test_document_workbenches_revert_semantically_and_protect_dirty_navigation(
+    page, live_server
+) -> None:
+    account, application = _document_candidate("document-dirty-browser@example.com")
+
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill(account.email)
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+
+    workbench = page.locator("[data-document-workbench]")
+    assert workbench.get_attribute("data-save-state") == "clean"
+    page.get_by_role("link", name="Reset Resume").click()
+    reset_dialog = page.get_by_role("dialog")
+    assert reset_dialog.get_by_text(
+        "Your saved Resume is unchanged until you choose Save Resume."
+    ).is_visible()
+    assert page.evaluate("document.activeElement.textContent") == "Cancel"
+    reset_dialog.get_by_role("button", name="Cancel").click()
+
+    page.get_by_label("Full name").fill("Tailored Ada")
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+    page.locator('[name="header-full_name_inherit"]').check()
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+
+    page.get_by_label("Full name").fill("Tailored Ada")
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+    unload = page.evaluate(
+        """
+        () => {
+          const event = new Event('beforeunload', { cancelable: true });
+          window.dispatchEvent(event);
+          return { prevented: event.defaultPrevented, returnValue: event.returnValue };
+        }
+        """
+    )
+    assert unload["prevented"] is True
+
+    back = page.get_by_role("link", name="Back to application")
+    back.click()
+    dialog = page.get_by_role("dialog")
+    assert dialog.get_by_role("heading", name="Discard unsaved changes?").is_visible()
+    assert page.evaluate("document.activeElement.textContent") == "Keep editing"
+    page.keyboard.press("Escape")
+    assert not dialog.is_visible()
+    assert page.evaluate("document.activeElement.textContent") == "Back to application"
+
+    back.click()
+    dialog.get_by_role("button", name="Discard changes").click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+
+
+@pytest.mark.django_db
+def test_cover_letter_failed_save_preserves_draft_and_suppresses_duplicate_submit(
+    page, live_server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account, application = _document_candidate("cover-letter-failed-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved body.</p>")
+
+    def fail_save(self: CoverLetter, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(CoverLetter, "save", fail_save)
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill(account.email)
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.goto(f"{live_server.url}{reverse('cover_letter_detail', args=[application.pk])}")
+
+    editor = page.locator(".ql-editor")
+    editor.fill("Retry me after a failed save.")
+    form = page.locator("#cover-letter-form")
+    form.evaluate(
+        """
+        form => {
+          form.addEventListener('submit', event => event.preventDefault(), { once: true });
+          form.requestSubmit();
+        }
+        """
+    )
+    page.wait_for_timeout(50)
+    assert page.get_by_text("Saving...", exact=True).is_visible()
+    assert editor.get_attribute("contenteditable") == "false"
+    assert page.get_by_role("button", name="Save letter").first.is_disabled()
+    page.reload()
+
+    editor = page.locator(".ql-editor")
+    editor.fill("Retry me after a failed save.")
+    form = page.locator("#cover-letter-form")
+    duplicate_prevented = form.evaluate(
+        """
+        form => {
+          form.dataset.saving = 'true';
+          const event = new SubmitEvent('submit', { cancelable: true });
+          form.dispatchEvent(event);
+          return event.defaultPrevented;
+        }
+        """,
+    )
+    assert duplicate_prevented is True
+    save_button = page.get_by_role("button", name="Save letter").first
+    form.evaluate("form => form.dataset.saving = 'false'")
+    save_button.click()
+    page.wait_for_load_state("load")
+
+    assert page.get_by_text("Save failed", exact=True).is_visible()
+    assert page.locator(".ql-editor").inner_text() == "Retry me after a failed save."
+    assert save_button.is_enabled()
+    assert page.get_by_role("button", name="Save letter").first.is_enabled()
+
+
+@pytest.mark.django_db
+def test_dirty_cover_letter_delete_names_saved_and_unsaved_content(page, live_server) -> None:
+    account, application = _document_candidate("cover-letter-delete-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved body.</p>")
+
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.get_by_label("Email").fill(account.email)
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.goto(f"{live_server.url}{reverse('cover_letter_detail', args=[application.pk])}")
+    page.locator(".ql-editor").fill("Unsaved body.")
+    page.get_by_role("button", name="Delete letter").click()
+
+    dialog = page.get_by_role("dialog")
+    assert dialog.get_by_text(
+        "This permanently deletes the saved Cover Letter and discards your current unsaved draft."
+    ).is_visible()
+    assert page.evaluate("document.activeElement.textContent") == "Cancel"
+    dialog.get_by_role("button", name="Cancel").click()
+    assert not dialog.is_visible()
+
+    lifecycle = page.locator("[data-document-workbench]")
+    assert (
+        lifecycle.evaluate(
+            """
+        root => {
+          document.dispatchEvent(new CustomEvent('htmx:beforeCleanupElement', {
+            detail: { elt: root },
+          }));
+          document.dispatchEvent(new CustomEvent('htmx:afterSwap', { detail: { target: root } }));
+          return Boolean(root._documentWorkbench) && root.querySelectorAll('.ql-toolbar').length;
+        }
+        """
+        )
+        == 1
+    )
