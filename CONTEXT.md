@@ -12,8 +12,10 @@ The first release is the tracking core:
 - application campaigns with weekly and monthly submission goals
 - job applications with stage history
 - upcoming recruitment events on the dashboard
+- application-specific Resume tailoring
+- optional Cover Letter authoring
 
-Tailored Resume workbenches are available for Job Applications. Cover Letter authoring, company research, AI suggestions, and email reminders remain future capabilities. Do not create speculative abstractions for them.
+Document preview, export, print layout, AI suggestions, version history, collaboration, and immutable submission snapshots remain future capabilities. Company research and email reminders also remain outside the current product boundary. Do not create speculative abstractions for them.
 
 ## Core workflow
 
@@ -43,7 +45,7 @@ Only full name and timezone are required before using tracking features. All oth
 
 The timezone is stored as an IANA timezone identifier. Candidates choose it from every identifier available in the installed IANA timezone database; the selector displays each identifier with its current UTC offset, but the offset is not stored.
 
-Do not shorten this term to CV when referring to the source data. A future Resume is a document derived from this profile.
+Do not shorten this term to CV when referring to the source data. A Resume is an application-specific document derived from this profile.
 
 ### Skill Concept
 
@@ -91,11 +93,19 @@ The candidate may add, edit, or remove requirements. Re-extracting requirements 
 
 ### Resume
 
-An application-owned, private document that opens lazily for one Job Application. A Resume is a relational live overlay over its Account's Candidate Profile: source content inherits current profile values until a Resume-specific override is saved. Blank overrides reset to inheritance. Membership, inclusion, ordering, and overrides are application-specific, and Reset Resume rebuilds them from current profile and application requirements. A Resume cannot be independently deleted; deleting its Job Application deletes it.
+An application-owned, private one-to-one document that is lazily created when its Job Application's Resume workbench first opens. It is a typed relational live overlay over the owning Account's Candidate Profile, not a snapshot and not a source of Candidate Profile content.
+
+Inheritance means each rendered value follows its current Candidate Profile source until a Resume-specific override is saved. An override is application-specific and remains sticky until Reset even when it equals the source; saving it blank resets that value to inheritance rather than intentionally rendering blank content. Membership, inclusion, and ordering are separate application-specific structural state.
+
+A field reset removes only that override. An item reset clears its overrides and nested child tailoring while preserving its inclusion and position. A section reset clears its overrides, exclusions, membership changes, and item ordering, rebuilds that section's membership and item-order defaults from current Candidate Profile and Job Application data, and preserves the section's position. Reset Resume rebuilds the complete overlay from current Candidate Profile data and Application Skill Requirements. No reset mutates the Candidate Profile, and every reset remains local until the complete page-wide draft is successfully saved.
+
+Removing a source-backed item from a Resume deletes its descendant overlay state. Deleting a Candidate Profile source deletes overlay state keyed to it; deleting the final Candidate Skill Association for an aggregated Resume Skill deletes that item and its override. A Resume cannot be independently deleted; deleting its owning Job Application or Account deletes it.
 
 ### Cover Letter
 
-An optional application-owned, private document. Reading an application does not create one. The first successful save creates sanitized content; deleting it returns the application to Not created. Deleting its Job Application or Account deletes it.
+An optional application-owned, private one-to-one document containing narrow server-sanitized HTML. Optional means its Job Application may remain in the Not created state at every Application Stage: reading the workbench, opening a blank editor, or loading the local starter template does not create it.
+
+The first successful page-wide save creates the Cover Letter. Saving blank content cannot delete it; explicit deletion returns it to Not created and discards its saved content. Deleting its owning Job Application or Account also deletes it.
 
 ### Skill Coverage
 
@@ -139,12 +149,12 @@ The first release displays upcoming events on the dashboard and does not send re
 - Every query and mutation of private data must be scoped to the authenticated Account.
 - A shared Company must contain only public canonical identity data.
 - Skill Concepts and their aliases are globally shared public catalog data. Candidate Skill Associations and Application Skill Requirements remain private to one Account.
-- Deleting an Account deletes its private domain data but does not delete shared Companies.
-- Users may hard-delete Job Applications. Because Campaign Progress is derived from existing applications, deleting a submitted application changes any current or historical goal calculation that included it. The UI must warn about that consequence.
+- Deleting an Account deletes its private domain data, including Resumes and Cover Letters, but does not delete shared Companies or Skill Concepts.
+- Users may hard-delete Job Applications. This cascades their tailored Resume and Cover Letter content. Because Campaign Progress is derived from existing applications, deleting a submitted application also changes any current or historical goal calculation that included it. The UI must warn about those consequences.
 
 ## Capability boundaries
 
-The initial Django apps are:
+The active Django app boundaries are:
 
 - `accounts`: custom account model and django-allauth integration
 - `profiles`: Candidate Profile and its ordered career-history records
@@ -153,7 +163,7 @@ The initial Django apps are:
 - `resumes`: application-owned Resume live overlays and deterministic initialization
 - `cover_letters`: optional application-owned Cover Letter content
 
-AI-assisted research and suggestions need a separate decision about provider boundaries, consent, retention, and handling of candidate data before implementation.
+Preview, PDF/DOCX export, rendered files, print layout, AI, semantic matching, asynchronous infrastructure, named document variants, version history, collaboration, immutable submission snapshots, and requiring a Resume for `Submitted` are outside the current document app boundaries. AI-assisted research and suggestions need a separate decision about provider boundaries, consent, retention, and handling of candidate data before implementation.
 
 ## Unresolved future questions
 
