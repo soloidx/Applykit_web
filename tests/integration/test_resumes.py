@@ -1112,3 +1112,73 @@ def test_recreated_source_does_not_reconnect_deleted_resume_overlay() -> None:
         experience=other_experience,
         role_override="Other tailored role",
     ).exists()
+
+
+@pytest.mark.django_db
+def test_resume_initial_items_follow_authored_position_after_reorder() -> None:
+    account = verified_candidate("resume-authored-order@example.com")
+    first = Experience.objects.create(
+        profile=account.candidate_profile,
+        role="First role",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    Experience.objects.create(
+        profile=account.candidate_profile,
+        role="Second role",
+        organization="Example",
+        location="London",
+        start_date="2021-01-01",
+    )
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    first_overlay = resume.experiences.get(experience=first)
+    second_overlay = resume.experiences.exclude(experience=first).get()
+
+    second_overlay.position = 0
+    second_overlay.save(update_fields=["position"])
+    first_overlay.position = 1
+    first_overlay.save(update_fields=["position"])
+
+    draft_forms = build_resume_forms(resume=resume)
+    order = [form.initial["source_id"] for form in draft_forms.experiences.forms]
+
+    assert order == [second_overlay.experience_id, first_overlay.experience_id]
+
+
+@pytest.mark.django_db
+def test_resume_detail_renders_source_rail_and_move_controls_markup() -> None:
+    account = verified_candidate("resume-workbench-markup@example.com")
+    profile = account.candidate_profile
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        location="London",
+        start_date="2020-01-01",
+    )
+    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    application = application_for(account)
+    Project.objects.create(profile=profile, name="Toolkit", description="A toolkit.")
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+
+    response = client.get(reverse("resume_detail", args=[application.pk]))
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "<aside" in content
+    assert 'data-action="source-toggle"' in content
+    assert 'data-action="move-up"' in content
+    assert 'data-action="move-down"' in content
+    assert "MATCH" in content
+    assert Resume.objects.get(pk=resume.pk).experiences.get().is_relevant is True

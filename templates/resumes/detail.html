@@ -33,13 +33,16 @@
         <summary class="cursor-pointer font-display text-xl font-semibold">Experience</summary>
         <div class="mt-3 space-y-2">
           {% for form in draft_forms.experiences %}
-          <a class="block rounded-xl bg-white/10 p-3 transition hover:bg-white/15" href="#experience-{{ form.source_id.value }}">
-            <div class="flex items-start justify-between gap-2">
-              <div><p class="text-sm font-semibold">{{ form.role_override.value }}</p><p class="text-xs text-white/50">{{ form.organization_override.value }}</p></div>
-              {% if form.source_id.value in default_draft.relevant_experience_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
-            </div>
-            <p class="mt-2 text-xs text-white/55">{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
-          </a>
+          <div class="rounded-xl bg-white/10 p-3" data-source-entry data-formset="experiences" data-source-id="{{ form.source_id.value }}">
+            <a class="block transition hover:bg-white/15" href="#experience-{{ form.source_id.value }}">
+              <div class="flex items-start justify-between gap-2">
+                <div><p class="text-sm font-semibold">{{ form.role_override.value }}</p><p class="text-xs text-white/50">{{ form.organization_override.value }}</p></div>
+                {% if form.source_id.value in default_draft.relevant_experience_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
+              </div>
+              <p class="mt-2 text-xs text-white/55" data-source-status>{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
+            </a>
+            <button class="mt-2 text-xs font-bold text-yellow" type="button" data-action="source-toggle" data-formset="experiences" data-source-id="{{ form.source_id.value }}" aria-pressed="{% if form.included.value %}true{% else %}false{% endif %}">{% if form.included.value %}Hide from Resume{% else %}Add back to Resume{% endif %}</button>
+          </div>
           {% empty %}<p class="text-sm text-white/50">No Experience records.</p>{% endfor %}
         </div>
       </details>
@@ -47,13 +50,16 @@
         <summary class="cursor-pointer font-display text-xl font-semibold">Projects</summary>
         <div class="mt-3 space-y-2">
           {% for form in draft_forms.projects %}
-          <a class="block rounded-xl bg-white/10 p-3 transition hover:bg-white/15" href="#project-{{ form.source_id.value }}">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-sm font-semibold">{{ form.name_override.value }}</p>
-              {% if form.source_id.value in default_draft.relevant_project_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
-            </div>
-            <p class="mt-2 text-xs text-white/55">{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
-          </a>
+          <div class="rounded-xl bg-white/10 p-3" data-source-entry data-formset="projects" data-source-id="{{ form.source_id.value }}">
+            <a class="block transition hover:bg-white/15" href="#project-{{ form.source_id.value }}">
+              <div class="flex items-start justify-between gap-2">
+                <p class="text-sm font-semibold">{{ form.name_override.value }}</p>
+                {% if form.source_id.value in default_draft.relevant_project_ids %}<span class="rounded-full bg-yellow px-2 py-1 text-[0.6rem] font-bold text-ink">MATCH</span>{% endif %}
+              </div>
+              <p class="mt-2 text-xs text-white/55" data-source-status>{% if form.included.value %}Included{% else %}Available to add{% endif %}</p>
+            </a>
+            <button class="mt-2 text-xs font-bold text-yellow" type="button" data-action="source-toggle" data-formset="projects" data-source-id="{{ form.source_id.value }}" aria-pressed="{% if form.included.value %}true{% else %}false{% endif %}">{% if form.included.value %}Hide from Resume{% else %}Add back to Resume{% endif %}</button>
+          </div>
           {% empty %}<p class="text-sm text-white/50">No Project records.</p>{% endfor %}
         </div>
       </details>
@@ -104,7 +110,7 @@
       {{ draft_forms.sections.management_form }}
       <section class="border-b border-ink/10 py-8" data-section-kind="sections">
         <div class="flex items-center justify-between gap-4"><h2 class="font-display text-2xl font-semibold">Resume sections</h2><p class="text-xs text-ink/50">Set explicit positions</p></div>
-        <div class="mt-4 grid gap-3 sm:grid-cols-2">{% for form in draft_forms.sections %}<div class="rounded-xl bg-sand/60 p-3" data-section-row data-section-kind="{{ form.kind.value }}">{{ form.kind }}<label class="text-xs font-semibold" for="{{ form.position.id_for_label }}">{{ form.kind.value|capfirst }} position</label>{{ form.position }}{{ form.errors }}</div>{% endfor %}</div>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">{% for form in draft_forms.sections %}<div class="rounded-xl bg-sand/60 p-3" data-section-row data-section-kind="{{ form.kind.value }}"><div class="flex items-center justify-between gap-3">{{ form.kind }}<div class="flex gap-1"><button class="rounded-full border border-ink/15 px-2.5 py-1 text-xs font-bold" type="button" data-action="move-up" aria-label="Move section up">Move up</button><button class="rounded-full border border-ink/15 px-2.5 py-1 text-xs font-bold" type="button" data-action="move-down" aria-label="Move section down">Move down</button></div></div><label class="text-xs font-semibold" for="{{ form.position.id_for_label }}">{{ form.kind.value|capfirst }} position</label>{{ form.position }}{{ form.errors }}</div>{% endfor %}</div>
         {{ draft_forms.sections.non_form_errors }}
       </section>
 

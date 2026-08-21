@@ -7,10 +7,23 @@ from django.core import mail
 from django.urls import reverse
 
 from apps.accounts.models import Account
-from apps.applications.models import Company, JobApplication, RecruitmentEvent
+from apps.applications.models import (
+    ApplicationSkillRequirement,
+    Company,
+    JobApplication,
+    RecruitmentEvent,
+)
 from apps.campaigns.models import Campaign
 from apps.cover_letters.models import CoverLetter
-from apps.profiles.models import CandidateProfile
+from apps.profiles.models import (
+    CandidateProfile,
+    Education,
+    Experience,
+    ExperienceSkill,
+    Language,
+    Project,
+)
+from apps.skills.models import SkillConcept
 
 # pytest-playwright starts its sync API from an async-managed fixture context.
 os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
@@ -491,3 +504,266 @@ def test_dirty_cover_letter_delete_names_saved_and_unsaved_content(page, live_se
         )
         == 1
     )
+
+
+def _resume_workbench_candidate(email: str) -> tuple[Account, JobApplication]:
+    account = Account.objects.create_user(email, "a-secure-password")
+    EmailAddress.objects.create(
+        user=account,
+        email=account.email,
+        primary=True,
+        verified=True,
+    )
+    profile = CandidateProfile.objects.create(
+        account=account,
+        full_name="Ada Lovelace",
+        professional_summary="A dependable engineer.",
+        timezone="Europe/London",
+    )
+    campaign = Campaign.objects.create(
+        account=account,
+        weekly_target=5,
+        monthly_target=20,
+        timezone="Europe/London",
+    )
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=campaign,
+        company=Company.objects.create(name="Example Careers"),
+        role_title="Platform engineer",
+        job_description="Build dependable Python systems.",
+    )
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    first = Experience.objects.create(
+        profile=profile,
+        role="Backend engineer",
+        organization="FirstOrg",
+        location="London",
+        start_date="2020-01-01",
+        description="Built internal systems.",
+    )
+    ExperienceSkill.objects.create(experience=first, concept=concept, label="Python")
+    Experience.objects.create(
+        profile=profile,
+        role="Intern",
+        organization="SecondOrg",
+        location="London",
+        start_date="2021-01-01",
+    )
+    Education.objects.create(
+        profile=profile,
+        institution="University",
+        degree="Mathematics",
+        start_date="2016-01-01",
+    )
+    Project.objects.create(profile=profile, name="Toolkit", description="A toolkit.")
+    Language.objects.create(
+        profile=profile,
+        name="English",
+        proficiency=Language.Proficiency.NATIVE,
+    )
+    ApplicationSkillRequirement.objects.create(
+        application=application,
+        concept=concept,
+        label="Python",
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    return account, application
+
+
+def _sign_in(page, account: Account, email: str, live_server_url: str) -> None:
+    page.goto(f"{live_server_url}/accounts/login/")
+    page.get_by_label("Email").fill(email)
+    page.get_by_label("Password").fill("a-secure-password")
+    page.get_by_role("button", name="Sign in").click()
+
+
+@pytest.mark.django_db
+def test_resume_workbench_source_rail_beside_canvas_on_desktop_and_stacked_on_mobile(
+    page, live_server
+) -> None:
+    account, application = _resume_workbench_candidate("resume-layout-browser@example.com")
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    page.set_viewport_size({"width": 1280, "height": 900})
+    rail = page.locator("aside")
+    canvas = page.locator("#resume-form")
+    rail_box = rail.bounding_box()
+    canvas_box = canvas.bounding_box()
+
+    assert rail_box is not None and canvas_box is not None
+    assert rail_box["x"] + rail_box["width"] <= canvas_box["x"]
+    assert rail_box["y"] < canvas_box["y"] + canvas_box["height"]
+
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_timeout(200)
+    rail_box = rail.bounding_box()
+    canvas_box = canvas.bounding_box()
+    assert rail_box is not None and canvas_box is not None
+    assert rail_box["x"] == canvas_box["x"]
+    assert rail_box["y"] + rail_box["height"] <= canvas_box["y"] + 2
+
+
+@pytest.mark.django_db
+def test_resume_workbench_source_rail_toggles_include_and_hide(page, live_server) -> None:
+    account, application = _resume_workbench_candidate("resume-rail-toggle-browser@example.com")
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    rail_experience = page.locator('[data-source-entry][data-formset="experiences"]').first
+    assert rail_experience.locator("[data-source-status]").inner_text() == "Included"
+    assert (
+        rail_experience.locator("[data-action=source-toggle]")
+        .inner_text()
+        .strip()
+        .startswith("Hide from Resume")
+    )
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+
+    rail_experience.locator("[data-action=source-toggle]").click()
+
+    assert rail_experience.locator("[data-source-status]").inner_text() == "Available to add"
+    assert rail_experience.locator("button").inner_text().strip().startswith("Add back to Resume")
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+
+    first_card = page.locator('#resume-form [data-formset="experiences"]').first
+    assert first_card.locator('[name$="-included"]').is_checked() is False
+
+    rail_experience.locator("[data-action=source-toggle]").click()
+    assert rail_experience.locator("[data-source-status]").inner_text() == "Included"
+    assert rail_experience.locator("button").inner_text().strip().startswith("Hide from Resume")
+    assert first_card.locator('[name$="-included"]').is_checked() is True
+
+
+@pytest.mark.django_db
+def test_resume_workbench_move_controls_reorder_sections_without_drag_and_drop(
+    page, live_server
+) -> None:
+    account, application = _resume_workbench_candidate("resume-move-browser@example.com")
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    rows = page.locator("[data-section-row]")
+    assert rows.count() >= 2
+    first_position = rows.nth(0).locator('[name$="-position"]').element_handle()
+    second_position = rows.nth(1).locator('[name$="-position"]').element_handle()
+    assert first_position.input_value() == "0"
+    assert second_position.input_value() == "1"
+
+    rows.nth(0).locator('[data-action="move-down"]').click()
+
+    assert first_position.input_value() == "1"
+    assert second_position.input_value() == "0"
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+
+
+@pytest.mark.django_db
+def test_resume_workbench_move_controls_reorder_items_without_drag_and_drop(
+    page, live_server
+) -> None:
+    account, application = _resume_workbench_candidate("resume-move-items-browser@example.com")
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    cards = page.locator('#resume-form [data-formset="experiences"]')
+    assert cards.count() == 2
+    first_position = cards.nth(0).locator('[name$="-position"]').element_handle()
+    second_position = cards.nth(1).locator('[name$="-position"]').element_handle()
+    assert first_position.input_value() == "0"
+    assert second_position.input_value() == "1"
+
+    cards.nth(0).locator('[data-action="move-down"]').click()
+
+    assert first_position.input_value() == "1"
+    assert second_position.input_value() == "0"
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+
+
+@pytest.mark.django_db
+def test_resume_workbench_save_reload_preserves_moves_hides_and_tailoring(
+    page, live_server
+) -> None:
+    account, application = _resume_workbench_candidate("resume-save-reload-browser@example.com")
+    experiences_sources = list(
+        Experience.objects.filter(profile=account.candidate_profile).order_by("position", "id")
+    )
+    first_experience_id = str(experiences_sources[0].pk)
+    second_experience_id = str(experiences_sources[1].pk)
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    page.get_by_label("Full name").fill("Tailored Ada")
+    page.locator("[data-section-row]").nth(0).locator('[data-action="move-down"]').click()
+    cards = page.locator('#resume-form [data-formset="experiences"]')
+    cards.nth(1).locator('[data-action="move-up"]').click()
+    page.locator("aside details", has_text="Projects").locator("summary").click()
+    rail_project = page.locator('[data-source-entry][data-formset="projects"]').first
+    rail_project.locator("[data-action=source-toggle]").click()
+
+    page.get_by_role("button", name="Save Resume").first.click()
+    page.wait_for_url(f"**{reverse('resume_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+    assert page.get_by_label("Full name").input_value() == "Tailored Ada"
+
+    sections = page.locator("[data-section-row]")
+    assert sections.nth(0).get_attribute("data-section-kind") == "skills"
+    assert sections.nth(1).get_attribute("data-section-kind") == "summary"
+
+    experiences = page.locator('#resume-form [data-formset="experiences"]')
+    assert experiences.nth(0).get_attribute("data-source-id") == second_experience_id
+    assert experiences.nth(1).get_attribute("data-source-id") == first_experience_id
+
+    page.locator("aside details", has_text="Projects").locator("summary").click()
+    project_entry = page.locator('[data-source-entry][data-formset="projects"]').first
+    assert project_entry.locator("[data-source-status]").inner_text() == "Available to add"
+
+    page.reload()
+    assert page.get_by_label("Full name").input_value() == "Tailored Ada"
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+    assert page.locator("[data-section-row]").nth(0).get_attribute("data-section-kind") == "skills"
+
+
+@pytest.mark.django_db
+def test_resume_workbench_core_editing_works_with_javascript_disabled(live_server, browser) -> None:
+    account, application = _resume_workbench_candidate("resume-nojs-browser@example.com")
+    context = browser.new_context(java_script_enabled=False)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}/accounts/login/")
+        page.get_by_label("Email").fill(account.email)
+        page.get_by_label("Password").fill("a-secure-password")
+        page.get_by_role("button", name="Sign in").click()
+        page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
+
+        page.get_by_label("Full name").fill("No-JS Tailored")
+        page.locator('[name="header-full_name_inherit"]').uncheck()
+        sections = page.locator("[data-section-row]")
+        sections.nth(0).locator('[name$="-position"]').fill("1")
+        sections.nth(1).locator('[name$="-position"]').fill("0")
+        page.locator('#resume-form [data-formset="projects"]').first.locator(
+            '[name$="-included"]'
+        ).uncheck()
+
+        page.get_by_role("button", name="Save Resume").first.click()
+        page.wait_for_url(f"**{reverse('resume_detail', args=[application.pk])}")
+        page.wait_for_load_state("load")
+
+        assert page.get_by_text("Saved", exact=True).first.is_visible()
+        assert page.get_by_label("Full name").input_value() == "No-JS Tailored"
+        sections = page.locator("[data-section-row]")
+        assert sections.nth(0).get_attribute("data-section-kind") == "skills"
+        assert sections.nth(1).get_attribute("data-section-kind") == "summary"
+        project_checkbox = page.locator('#resume-form [data-formset="projects"]').first.locator(
+            '[name$="-included"]'
+        )
+        assert project_checkbox.is_checked() is False
+    finally:
+        context.close()

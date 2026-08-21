@@ -155,6 +155,9 @@
         if (inherit) inherit.checked = false;
       }
       if (form.dataset.saving !== "true") updateDirty();
+      if (target.type === "checkbox" && target.name && target.name.endsWith("-included")) {
+        if (typeof syncSourceEntries === "function") syncSourceEntries();
+      }
     };
     form.addEventListener("input", onInput);
     form.addEventListener("change", onInput);
@@ -219,6 +222,78 @@
       if (value === "confirm") resetResume();
     });
     cleanups.push(cleanupResetDialog);
+
+    const siblingsFor = scope => {
+      if (scope.matches("[data-section-row]")) {
+        return [...form.querySelectorAll("[data-section-row]")];
+      }
+      let siblings = [...scope.parentElement.querySelectorAll(
+        `[data-formset="${scope.dataset.formset}"]`,
+      )];
+      if (scope.dataset.formset === "highlights") {
+        siblings = siblings.filter(sibling => (
+          sibling.dataset.experienceId === scope.dataset.experienceId
+        ));
+      }
+      return siblings;
+    };
+    const moveItem = (action, scope) => {
+      if (!scope || form.dataset.saving === "true") return;
+      const siblings = siblingsFor(scope);
+      const index = siblings.indexOf(scope);
+      const delta = action.dataset.action === "move-up" ? -1 : 1;
+      const target = siblings[index + delta];
+      if (!target) return;
+      const positionA = input(scope, "position");
+      const positionB = input(target, "position");
+      if (positionA && positionB) {
+        const swap = positionA.value;
+        positionA.value = positionB.value;
+        positionB.value = swap;
+      }
+      if (delta === -1) scope.parentElement.insertBefore(scope, target);
+      else target.insertAdjacentElement("afterend", scope);
+      updateDirty();
+    };
+    const sourceCard = (formset, sourceId) => form.querySelector(
+      `[data-formset="${formset}"][data-source-id="${sourceId}"]`,
+    );
+    const syncSourceEntries = () => {
+      root.querySelectorAll("[data-source-entry]").forEach(entry => {
+        const card = sourceCard(entry.dataset.formset, entry.dataset.sourceId);
+        const include = card && input(card, "included");
+        const included = Boolean(include && include.checked);
+        const status = entry.querySelector("[data-source-status]");
+        if (status) status.textContent = included ? "Included" : "Available to add";
+        const button = entry.querySelector("[data-action=source-toggle]");
+        if (button) {
+          button.textContent = included ? "Hide from Resume" : "Add back to Resume";
+          button.setAttribute("aria-pressed", included ? "true" : "false");
+        }
+      });
+    };
+    const sourceToggle = action => {
+      const card = sourceCard(action.dataset.formset, action.dataset.sourceId);
+      if (!card || form.dataset.saving === "true") return;
+      const checkbox = input(card, "included");
+      if (!checkbox) return;
+      checkbox.checked = !checkbox.checked;
+      if (checkbox.checked) {
+        let maxPosition = -1;
+        siblingsFor(card).forEach(sibling => {
+          if (sibling === card) return;
+          const include = input(sibling, "included");
+          const position = input(sibling, "position");
+          if (include && include.checked && position) {
+            maxPosition = Math.max(maxPosition, Number(position.value) || 0);
+          }
+        });
+        const position = input(card, "position");
+        if (position) position.value = String(maxPosition + 1);
+      }
+      syncSourceEntries();
+      updateDirty();
+    };
 
     const input = (scope, name) => scope.querySelector(`[name="${name}"]`) || scope.querySelector(`[name$="-${name}"]`);
     const defaultsElement = root.querySelector("#resume-default-draft");
@@ -324,6 +399,9 @@
       } else if (action.dataset.action === "reset-field") resetField(action);
       else if (action.dataset.action === "reset-item") resetItem(action);
       else if (action.dataset.action === "reset-section") resetSection(action.closest("[data-section-kind]"));
+      else if (action.dataset.action === "move-up" || action.dataset.action === "move-down") {
+        moveItem(action, action.closest("[data-section-row]") || action.closest("[data-formset]"));
+      } else if (action.dataset.action === "source-toggle") sourceToggle(action);
     };
     root.addEventListener("click", onAction);
     cleanups.push(() => root.removeEventListener("click", onAction));

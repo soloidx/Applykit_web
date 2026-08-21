@@ -450,6 +450,14 @@ def _item_initial(item: Any, source: Any, fields: tuple[str, ...]) -> dict[str, 
     return initial
 
 
+def _authored_initial(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort draft rows so included records follow saved authored order first."""
+    return sorted(
+        rows,
+        key=lambda row: (0 if row["included"] else 1, row.get("position") or 0, row["source_id"]),
+    )
+
+
 def build_resume_forms(
     *, resume: Resume, data: Any = None, default_draft: dict[str, Any] | None = None
 ) -> ResumeDraftForms:
@@ -579,6 +587,20 @@ def build_resume_forms(
                 }
             )
 
+    initial_experiences = _authored_initial(initial_experiences)
+    initial_projects = _authored_initial(initial_projects)
+    initial_educations = _authored_initial(initial_educations)
+    initial_languages = _authored_initial(initial_languages)
+    initial_skills = _authored_initial(initial_skills)
+    initial_highlights = sorted(
+        initial_highlights,
+        key=lambda row: (
+            row["experience_id"],
+            0 if row["included"] else 1,
+            row.get("position") or 0,
+            row["source_id"],
+        ),
+    )
     header_initial: dict[str, Any] = {}
     for field in (
         "contact_email",
