@@ -133,8 +133,8 @@
     if (isCoverLetter && editor && textarea && window.Quill) {
       quill = new window.Quill(editor, {
         theme: "snow",
-        modules: { toolbar: root.querySelector("[data-toolbar]") },
-        formats: ["header", "bold", "italic", "list", "link"],
+        modules: { toolbar: { container: root.querySelector("[data-toolbar]") } },
+        formats: ["bold", "italic", "list", "link"],
       });
       quill.clipboard.dangerouslyPasteHTML(textarea.value || "");
       editor.classList.remove("hidden");

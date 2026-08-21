@@ -1,11 +1,14 @@
 import time
+from pathlib import Path
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.apps import apps
+from django.contrib.staticfiles import finders
+from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.loader import MigrationLoader
-from django.test import Client
+from django.test import Client, override_settings
 from django.urls import reverse
 
 from apps.accounts.models import Account
@@ -310,3 +313,26 @@ def test_cover_letter_routes_are_account_scoped_and_post_only_for_mutations() ->
     )
     assert client.get(reverse("cover_letter_save", args=[application.pk])).status_code == 405
     assert client.get(reverse("cover_letter_delete", args=[application.pk])).status_code == 405
+
+
+@pytest.mark.django_db
+def test_quill_is_pinned_self_hosted_and_collected_into_asset_builds(tmp_path: Path) -> None:
+    script_path = finders.find("vendor/quill/quill.min.js")
+    stylesheet_path = finders.find("vendor/quill/quill.snow.css")
+
+    assert script_path is not None
+    assert stylesheet_path is not None
+
+    script = Path(script_path)
+    parent = script.parent
+    assert Path(stylesheet_path).parent == parent
+    pinned_version = (parent / "VERSION").read_text().strip()
+    assert pinned_version == "2.0.3"
+    assert (parent / "LICENSE.txt").exists()
+    assert f'version="{pinned_version}"' in script.read_text()
+
+    with override_settings(STATIC_ROOT=str(tmp_path)):
+        call_command("collectstatic", interactive=False, verbosity=0)
+
+    assert (tmp_path / "vendor/quill/quill.min.js").exists()
+    assert (tmp_path / "vendor/quill/quill.snow.css").exists()

@@ -506,6 +506,258 @@ def test_dirty_cover_letter_delete_names_saved_and_unsaved_content(page, live_se
     )
 
 
+@pytest.mark.django_db
+def test_cover_letter_quill_initializes_once_across_htmx_replacement(page, live_server) -> None:
+    account, application = _document_candidate("cover-letter-htmx-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved letter body.</p>")
+    _open_cover_letter(page, account, application, live_server.url)
+    page.locator(".ql-editor").first.wait_for()
+
+    state = page.evaluate(
+        """
+        () => {
+          const root = document.querySelector('[data-document-workbench]');
+          const replacement = root.cloneNode(true);
+          const quillBefore = root._documentWorkbenchQuill;
+          document.dispatchEvent(new CustomEvent('htmx:beforeCleanupElement', {
+            detail: { elt: root },
+          }));
+          root.replaceWith(replacement);
+          document.dispatchEvent(new CustomEvent('htmx:afterSwap', {
+            detail: { target: replacement },
+          }));
+          const quillAfter = replacement._documentWorkbenchQuill;
+          quillAfter.clipboard.dangerouslyPasteHTML('<p>Draft after replacement.</p>');
+          return {
+            instanceSurvived: quillBefore === quillAfter,
+            initializedOnce: Boolean(quillAfter),
+            editorCount: document.querySelectorAll('.ql-editor').length,
+            toolbarCount: document.querySelectorAll('.ql-toolbar').length,
+            textareaSyncs: replacement.querySelector('[data-cover-letter-input]').value,
+          };
+        }
+        """
+    )
+
+    assert state["instanceSurvived"] is False
+    assert state["initializedOnce"] is True
+    assert state["editorCount"] == 1
+    assert state["toolbarCount"] == 1
+    assert "Draft after replacement." in state["textareaSyncs"]
+
+
+@pytest.mark.django_db
+def test_cover_letter_quill_toolbar_is_limited_to_paragraph_bold_italic_lists_and_link(
+    page, live_server
+) -> None:
+    account, application = _document_candidate("cover-letter-toolbar-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved letter body.</p>")
+    _open_cover_letter(page, account, application, live_server.url)
+
+    toolbar = page.locator("[data-toolbar]")
+    paragraph = toolbar.locator("select")
+    assert paragraph.locator("option").count() == 1
+    assert paragraph.locator("option").inner_text() == "Paragraph"
+    assert toolbar.get_by_role("button", name="Bold").is_visible()
+    assert toolbar.get_by_role("button", name="Italic").is_visible()
+    assert toolbar.get_by_role("button", name="Bulleted list").is_visible()
+    assert toolbar.get_by_role("button", name="Numbered list").is_visible()
+    assert toolbar.get_by_role("button", name="Add link").is_visible()
+
+
+@pytest.mark.django_db
+def test_cover_letter_quill_link_authoring_saves_and_renders_canonical_html(
+    page, live_server
+) -> None:
+    account, application = _document_candidate("cover-letter-link-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved letter body.</p>")
+    _open_cover_letter(page, account, application, live_server.url)
+
+    editor = page.locator(".ql-editor")
+    editor.fill("Please consider my credentials.")
+    page.evaluate(
+        """
+        () => {
+          const quill = document.querySelector('[data-document-workbench]')._documentWorkbenchQuill;
+          quill.setSelection(0, quill.getLength());
+        }
+        """
+    )
+    page.locator("[data-toolbar]").get_by_role("button", name="Add link").click()
+    tooltip = page.locator(".ql-tooltip")
+    tooltip.wait_for()
+    tooltip.locator("input[data-link]").fill("https://example.com/link")
+    tooltip.locator("a.ql-action").click()
+
+    textarea = page.locator("[data-cover-letter-input]")
+    assert "https://example.com/link" in textarea.input_value()
+
+    query = page.get_by_role("button", name="Save letter").first
+    query.click()
+    page.wait_for_url(f"**{reverse('cover_letter_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+    stored = CoverLetter.objects.get(application=application).body_html
+    assert 'href="https://example.com/link"' in stored
+    assert 'rel="nofollow noopener noreferrer"' in stored
+    assert "target=" not in stored
+
+    page.reload()
+    link = page.locator(".ql-editor a")
+    link.first.wait_for()
+    assert link.first.inner_text() == "Please consider my credentials."
+    assert link.first.get_attribute("href") == "https://example.com/link"
+
+    editor.fill("This paragraph should never become unsafe.")
+    page.evaluate(
+        """
+        () => {
+          const quill = document.querySelector('[data-document-workbench]')._documentWorkbenchQuill;
+          quill.setSelection(0, quill.getLength());
+        }
+        """
+    )
+    page.locator("[data-toolbar]").get_by_role("button", name="Add link").click()
+    tooltip = page.locator(".ql-tooltip")
+    tooltip.wait_for()
+    tooltip.locator("input[data-link]").fill("javascript:alert(1)")
+    tooltip.locator("a.ql-action").click()
+    page.get_by_role("button", name="Save letter").first.click()
+    page.wait_for_url(f"**{reverse('cover_letter_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+    stored = CoverLetter.objects.get(application=application).body_html
+    assert "javascript:" not in stored
+    assert "about:blank" not in stored
+    assert "This paragraph should never become unsafe." in stored
+
+    page.reload()
+    assert "javascript:" not in page.locator(".ql-editor").inner_html()
+
+
+@pytest.mark.django_db
+def test_cover_letter_workbench_stacks_context_above_editor_on_mobile(page, live_server) -> None:
+    account, application = _document_candidate("cover-letter-layout-browser@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved letter body.</p>")
+    _open_cover_letter(page, account, application, live_server.url)
+
+    _assert_rail_beside_canvas_then_stacked(
+        page,
+        page.locator("main > aside"),
+        page.locator("main > section"),
+    )
+
+
+@pytest.mark.django_db
+def test_cover_letter_confirmed_deletion_returns_to_not_created_in_browser(
+    page, live_server
+) -> None:
+    account, application = _document_candidate("cover-letter-delete-flow@example.com")
+    CoverLetter.objects.create(
+        application=application, body_html="<p>Delete me in the browser.</p>"
+    )
+    _open_cover_letter(page, account, application, live_server.url)
+
+    page.get_by_role("button", name="Delete letter").click()
+    dialog = page.get_by_role("dialog")
+    assert dialog.get_by_role("heading", name="Delete this Cover Letter?").is_visible()
+    dialog.get_by_role("button", name="Delete permanently").click()
+    page.wait_for_url(f"**{reverse('cover_letter_detail', args=[application.pk])}")
+
+    assert page.get_by_role("heading", name="Not created").is_visible()
+    assert not CoverLetter.objects.filter(application=application).exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_starter_template_and_blank_drafts_stay_local(page, live_server) -> None:
+    account, application = _document_candidate("cover-letter-template-flow@example.com")
+
+    _sign_in(page, account, account.email, live_server.url)
+    page.goto(
+        f"{live_server.url}{reverse('cover_letter_detail', args=[application.pk])}?draft=template"
+    )
+    page.wait_for_load_state("load")
+
+    editor = page.locator(".ql-editor")
+    editor.first.wait_for()
+    assert "Dear Hiring Team," in editor.inner_text()
+    assert page.get_by_text("Unsaved changes", exact=True).first.is_visible()
+
+    back = page.get_by_role("link", name="Back to application")
+    back.click()
+    dialog = page.get_by_role("dialog")
+    assert dialog.get_by_role("heading", name="Discard unsaved changes?").is_visible()
+    dialog.get_by_role("button", name="Keep editing").click()
+    assert not dialog.is_visible()
+    assert not CoverLetter.objects.filter(application=application).exists()
+
+    page.goto(
+        f"{live_server.url}{reverse('cover_letter_detail', args=[application.pk])}?draft=blank"
+    )
+    page.wait_for_load_state("load")
+
+    editor = page.locator(".ql-editor")
+    assert editor.inner_text().strip() == ""
+    assert page.get_by_text("Saved", exact=True).first.is_visible()
+    back.click()
+    page.wait_for_url(f"**{reverse('application_detail', args=[application.pk])}")
+    assert not CoverLetter.objects.filter(application=application).exists()
+
+
+@pytest.mark.django_db
+def test_cover_letter_textarea_save_works_with_javascript_disabled(live_server, browser) -> None:
+    account, application = _document_candidate("cover-letter-nojs@example.com")
+    CoverLetter.objects.create(application=application, body_html="<p>Saved letter body.</p>")
+
+    context = browser.new_context(java_script_enabled=False)
+    page = context.new_page()
+    try:
+        page.goto(f"{live_server.url}/accounts/login/")
+        page.get_by_label("Email").fill(account.email)
+        page.get_by_label("Password").fill("a-secure-password")
+        page.get_by_role("button", name="Sign in").click()
+        page.goto(f"{live_server.url}{reverse('cover_letter_detail', args=[application.pk])}")
+
+        textarea = page.locator("[data-cover-letter-input]")
+        assert textarea.is_visible()
+        textarea.fill("Authored without JavaScript.")
+        page.get_by_role("button", name="Save letter").first.click()
+        page.wait_for_url(f"**{reverse('cover_letter_detail', args=[application.pk])}")
+        page.wait_for_load_state("load")
+
+        assert page.get_by_text("Saved", exact=True).first.is_visible()
+        assert (
+            "Authored without JavaScript."
+            in CoverLetter.objects.get(application=application).body_html
+        )
+    finally:
+        context.close()
+
+
+def _open_cover_letter(page, account: Account, application: JobApplication, url: str) -> None:
+    _sign_in(page, account, account.email, url)
+    page.goto(f"{url}{reverse('cover_letter_detail', args=[application.pk])}")
+    page.wait_for_load_state("load")
+
+
+def _assert_rail_beside_canvas_then_stacked(page, rail, canvas) -> None:
+    page.set_viewport_size({"width": 1280, "height": 900})
+    rail_box = rail.bounding_box()
+    canvas_box = canvas.bounding_box()
+    assert rail_box is not None and canvas_box is not None
+    assert rail_box["x"] + rail_box["width"] <= canvas_box["x"]
+    assert rail_box["y"] < canvas_box["y"] + canvas_box["height"]
+
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_timeout(200)
+    rail_box = rail.bounding_box()
+    canvas_box = canvas.bounding_box()
+    assert rail_box is not None and canvas_box is not None
+    assert rail_box["x"] == canvas_box["x"]
+    assert rail_box["y"] + rail_box["height"] <= canvas_box["y"] + 2
+
+
 def _resume_workbench_candidate(email: str) -> tuple[Account, JobApplication]:
     account = Account.objects.create_user(email, "a-secure-password")
     EmailAddress.objects.create(
@@ -587,23 +839,11 @@ def test_resume_workbench_source_rail_beside_canvas_on_desktop_and_stacked_on_mo
     page.goto(f"{live_server.url}{reverse('resume_detail', args=[application.pk])}")
     page.wait_for_load_state("load")
 
-    page.set_viewport_size({"width": 1280, "height": 900})
-    rail = page.locator("aside")
-    canvas = page.locator("#resume-form")
-    rail_box = rail.bounding_box()
-    canvas_box = canvas.bounding_box()
-
-    assert rail_box is not None and canvas_box is not None
-    assert rail_box["x"] + rail_box["width"] <= canvas_box["x"]
-    assert rail_box["y"] < canvas_box["y"] + canvas_box["height"]
-
-    page.set_viewport_size({"width": 375, "height": 800})
-    page.wait_for_timeout(200)
-    rail_box = rail.bounding_box()
-    canvas_box = canvas.bounding_box()
-    assert rail_box is not None and canvas_box is not None
-    assert rail_box["x"] == canvas_box["x"]
-    assert rail_box["y"] + rail_box["height"] <= canvas_box["y"] + 2
+    _assert_rail_beside_canvas_then_stacked(
+        page,
+        page.locator("aside"),
+        page.locator("#resume-form"),
+    )
 
 
 @pytest.mark.django_db
