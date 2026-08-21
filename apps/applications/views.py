@@ -42,7 +42,9 @@ from apps.applications.services import (
     update_recruitment_event,
 )
 from apps.campaigns.models import Campaign
+from apps.cover_letters.models import CoverLetter
 from apps.profiles.models import CandidateProfile
+from apps.resumes.models import Resume
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -408,6 +410,8 @@ def application_delete(request: HttpRequest, application_id: int) -> HttpRespons
     context = {
         "application": application,
         "contributes_to_progress": application.first_submitted_at is not None,
+        "has_resume": Resume.objects.filter(application=application).exists(),
+        "has_cover_letter": CoverLetter.objects.filter(application=application).exists(),
     }
     if request.method == "GET":
         return render(request, "applications/delete.html", context)
