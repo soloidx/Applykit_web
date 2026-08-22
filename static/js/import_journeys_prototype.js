@@ -52,6 +52,7 @@
     journey: journeys[params.get("journey")] ? params.get("journey") : "onboarding",
     stage: ["acquire", "processing", "review", "failure", "saved"].includes(params.get("stage")) ? params.get("stage") : "acquire",
     consent: false,
+    manual: false,
     corrections: 0,
   };
 
@@ -82,7 +83,8 @@
     all("[data-upload-panel]").forEach((node) => node.classList.toggle("hidden", state.journey === "application"));
     all("[data-url-panel]").forEach((node) => node.classList.toggle("hidden", state.journey !== "application"));
     all("[data-consent-checkbox]").forEach((node) => { node.checked = state.consent; });
-    all("[data-save-button]").forEach((node) => { node.disabled = !state.consent; });
+    all("[data-ai-start]").forEach((node) => { node.disabled = !state.consent; });
+    all("[data-save-button]").forEach((node) => { node.disabled = state.stage !== "review"; });
     all("[data-set-journey]").forEach((node) => {
       const active = node.dataset.setJourney === state.journey;
       node.classList.toggle("bg-ink", active);
@@ -100,7 +102,7 @@
     setText("[data-source-name]", content.sourceName);
     setText("[data-source-meta]", content.sourceMeta);
     setText("[data-correction-count]", String(state.corrections));
-    setText("[data-state-output]", `journey=${state.journey} · stage=${state.stage} · consent=${state.consent} · corrections=${state.corrections}`);
+    setText("[data-state-output]", `journey=${state.journey} · stage=${state.stage} · consent=${state.consent} · manual=${state.manual} · corrections=${state.corrections}`);
     const current = variants.find(({ key }) => key === state.variant);
     setText("[data-variant-label]", `${current.key} — ${current.name}`);
     writeUrl();
@@ -117,6 +119,7 @@
     state.journey = node.dataset.setJourney;
     state.stage = "acquire";
     state.consent = false;
+    state.manual = false;
     state.corrections = 0;
     render();
   }));
@@ -126,6 +129,7 @@
   }));
   all("[data-consent-checkbox]").forEach((node) => node.addEventListener("change", () => {
     state.consent = node.checked;
+    state.manual = false;
     render();
   }));
   all("[data-add-correction]").forEach((node) => node.addEventListener("click", () => {
@@ -135,7 +139,8 @@
   }));
   all("[data-manual-fallback]").forEach((node) => node.addEventListener("click", () => {
     state.stage = "review";
-    state.consent = true;
+    state.consent = false;
+    state.manual = true;
     state.corrections = 0;
     render();
   }));
