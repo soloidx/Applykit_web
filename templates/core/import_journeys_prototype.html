@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Import journey prototype | ApplyKit{% endblock %}
+
+{% block content %}
+<!-- PROTOTYPE: Three import-review interaction models, switchable via ?variant=, on /prototype/import-journeys/. -->
+<section class="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12" data-prototype-root>
+  <header class="mb-8 flex flex-col gap-5 border-b border-ink/10 pb-8 lg:flex-row lg:items-end lg:justify-between">
+    <div class="max-w-3xl">
+      <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Throwaway prototype</p>
+      <h1 class="mt-2 font-display text-4xl font-semibold tracking-tight sm:text-6xl">Review an import before it becomes yours.</h1>
+      <p class="mt-4 max-w-2xl text-base leading-7 text-ink/65">Compare three ways to acquire source facts, wait, correct a private draft, and make one explicit save.</p>
+    </div>
+    <div class="rounded-2xl border border-ink/10 bg-cream px-4 py-3 font-mono text-xs text-ink/60" aria-live="polite">
+      <span class="font-semibold text-ink">Prototype state</span><br>
+      <span data-state-output>journey=onboarding · stage=acquire · consent=false · corrections=0</span>
+    </div>
+  </header>
+
+  <nav class="mb-8 flex gap-2 overflow-x-auto pb-2" aria-label="Import journey">
+    <button class="prototype-journey rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-set-journey="onboarding">Onboarding upload</button>
+    <button class="prototype-journey rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-set-journey="reimport">Profile re-import</button>
+    <button class="prototype-journey rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-set-journey="application">Job URL import</button>
+  </nav>
+
+  <section data-variant="A" hidden>
+    <div class="mb-6 flex items-center justify-between gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-coral">Variant A</p>
+        <h2 class="mt-1 font-display text-3xl font-semibold">Guided handoff</h2>
+      </div>
+      <p class="hidden max-w-md text-right text-sm text-ink/60 sm:block">One calm decision at a time. Best when import is an occasional task.</p>
+    </div>
+    <ol class="grid grid-cols-4 overflow-hidden rounded-2xl border border-ink/10 bg-cream text-xs font-semibold sm:text-sm">
+      <li class="p-3 sm:p-4" data-stage-marker="acquire"><span class="block text-coral">01</span>Source</li>
+      <li class="border-l border-ink/10 p-3 sm:p-4" data-stage-marker="processing"><span class="block text-coral">02</span>Process</li>
+      <li class="border-l border-ink/10 p-3 sm:p-4" data-stage-marker="review"><span class="block text-coral">03</span>Review</li>
+      <li class="border-l border-ink/10 p-3 sm:p-4" data-stage-marker="saved"><span class="block text-coral">04</span>Save</li>
+    </ol>
+    <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div class="rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+        <div data-stage-panel="acquire">
+          <p class="text-sm font-semibold text-coral" data-journey-kicker>Build your starting profile</p>
+          <h3 class="mt-2 font-display text-4xl font-semibold" data-acquire-title>Bring a resume, or start by hand.</h3>
+          <p class="mt-4 max-w-2xl leading-7 text-ink/65" data-acquire-copy>We extract source facts only. Nothing is added to your profile until you review and save it.</p>
+          <div class="mt-8 rounded-3xl border-2 border-dashed border-ink/15 bg-sand/60 p-8 text-center" data-upload-panel>
+            <p class="font-display text-2xl font-semibold">Drop a DOCX or text PDF</p>
+            <p class="mt-2 text-sm text-ink/55">One file, up to the stated limit. Scans are not supported.</p>
+            <button class="mt-5 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Choose sample resume</button>
+          </div>
+          <div class="mt-8 hidden" data-url-panel>
+            <label class="text-sm font-semibold" for="guided-url">Job posting URL</label>
+            <div class="mt-2 flex flex-col gap-3 sm:flex-row">
+              <input class="min-w-0 flex-1 rounded-xl border border-ink/20 bg-white px-4 py-3" id="guided-url" value="https://jobs.example.com/platform-engineer" type="url">
+              <button class="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Get posting</button>
+            </div>
+          </div>
+          <button class="mt-6 text-sm font-semibold text-coral" type="button" data-manual-fallback>Skip import and enter details manually</button>
+        </div>
+        <div data-stage-panel="processing" hidden>
+          <div class="flex min-h-80 flex-col items-center justify-center text-center">
+            <span class="flex size-16 items-center justify-center rounded-full border-4 border-coral/20 border-t-coral text-xl font-semibold">AI</span>
+            <h3 class="mt-6 font-display text-4xl font-semibold" data-processing-title>Reading source facts...</h3>
+            <p class="mt-3 max-w-lg leading-7 text-ink/60">Keep this page open. The source is processed for this request and is not stored as a document.</p>
+            <div class="mt-6 flex flex-wrap justify-center gap-3">
+              <button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="review">Show completed draft</button>
+              <button class="rounded-full border border-ink/15 px-5 py-3 text-sm font-semibold" type="button" data-set-state="failure">Show failure</button>
+            </div>
+          </div>
+        </div>
+        <div data-stage-panel="review" hidden>
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div><p class="text-sm font-semibold text-coral">Private browser draft</p><h3 class="mt-1 font-display text-4xl font-semibold">Check every source fact.</h3></div>
+            <span class="rounded-full bg-sand px-3 py-2 text-xs font-semibold">7 sections · 2 need attention</span>
+          </div>
+          <div class="mt-7 space-y-4">
+            <details class="rounded-2xl border border-ink/10 bg-white p-5" open><summary class="cursor-pointer font-semibold">Identity and summary <span class="ml-2 text-xs text-coral">Edited</span></summary><textarea class="mt-4 min-h-24 w-full rounded-xl border border-ink/20 p-3">Platform engineer building reliable developer tools.</textarea></details>
+            <details class="rounded-2xl border border-ink/10 bg-white p-5" open><summary class="cursor-pointer font-semibold">Experience <span class="ml-2 text-xs text-ink/45">3 entries</span></summary><div class="mt-4 rounded-xl bg-sand/70 p-4 text-sm"><strong>Senior Engineer · Northstar Labs</strong><p class="mt-2 leading-6 text-ink/65">Led platform work and reduced deployment time by 40%.</p><button class="mt-3 font-semibold text-coral" type="button" data-add-correction>Correct this entry</button></div></details>
+            <details class="rounded-2xl border border-coral/30 bg-white p-5" open><summary class="cursor-pointer font-semibold">Skills needing a choice <span class="ml-2 text-xs text-coral">2 unresolved</span></summary><div class="mt-4 grid gap-3 text-sm sm:grid-cols-2"><button class="rounded-xl border border-ink/15 p-4 text-left" type="button" data-add-correction><strong>React.js</strong><br><span class="text-ink/55">Use canonical React</span></button><button class="rounded-xl border border-ink/15 p-4 text-left" type="button" data-add-correction><strong>Platform ops</strong><br><span class="text-ink/55">Choose, create, or omit</span></button></div></details>
+          </div>
+          <label class="mt-7 flex items-start gap-3 rounded-2xl bg-sand/70 p-4 text-sm"><input class="mt-1" type="checkbox" data-consent-checkbox><span><strong>I agree to this one-time AI import.</strong><br><span class="text-ink/60">Only the displayed source text is sent for this import.</span></span></label>
+          <div class="mt-6 flex flex-wrap items-center gap-3"><button class="rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" type="button" data-save-button disabled data-set-state="saved">Save reviewed draft</button><button class="text-sm font-semibold text-ink/60" type="button" data-set-state="acquire">Discard draft</button></div>
+        </div>
+        <div data-stage-panel="failure" hidden>
+          <p class="text-sm font-semibold text-coral">Import stopped safely</p><h3 class="mt-2 font-display text-4xl font-semibold">We could not read this source.</h3><p class="mt-4 max-w-xl leading-7 text-ink/65">No profile or application data changed. Try a supported source or continue manually.</p><div class="mt-7 flex flex-wrap gap-3"><button class="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="acquire">Try another source</button><button class="rounded-full border border-ink/15 px-5 py-3 text-sm font-semibold" type="button" data-manual-fallback>Enter manually</button></div>
+        </div>
+        <div data-stage-panel="saved" hidden><p class="text-sm font-semibold text-coral">Saved atomically</p><h3 class="mt-2 font-display text-4xl font-semibold" data-saved-title>Your profile is ready.</h3><p class="mt-4 leading-7 text-ink/65" data-saved-copy>The reviewed draft is now your Candidate Profile.</p><button class="mt-7 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="acquire">Restart prototype</button></div>
+      </div>
+      <aside class="rounded-[2rem] border border-ink/10 bg-ink p-6 text-sand lg:sticky lg:top-6 lg:self-start">
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-coral">Before you continue</p><h3 class="mt-3 font-display text-2xl font-semibold" data-impact-title>No existing profile is changed.</h3><p class="mt-3 text-sm leading-6 text-sand/65" data-impact-copy>You will see a complete draft before the first save.</p><ul class="mt-6 space-y-3 text-sm text-sand/75"><li>Source facts only</li><li>Draft stays in this browser</li><li>Failed imports change nothing</li><li>Manual entry always available</li></ul>
+      </aside>
+    </div>
+  </section>
+
+  <section data-variant="B" hidden>
+    <div class="mb-6"><p class="text-xs font-semibold uppercase tracking-[0.2em] text-coral">Variant B</p><h2 class="mt-1 font-display text-3xl font-semibold">Review workspace</h2><p class="mt-2 text-sm text-ink/60">Source and proposed facts stay visible together. Best for confident, detail-heavy review.</p></div>
+    <div class="overflow-hidden rounded-[2rem] border border-ink/10 bg-cream shadow-[0_24px_80px_rgba(41,38,33,0.08)]">
+      <div class="grid border-b border-ink/10 bg-ink text-sand md:grid-cols-[16rem_1fr_auto]">
+        <div class="p-5"><p class="text-xs uppercase tracking-[0.18em] text-coral">Import desk</p><p class="mt-1 font-display text-xl font-semibold" data-workspace-title>Candidate profile</p></div>
+        <div class="flex gap-1 overflow-x-auto p-3" role="tablist"><button class="rounded-lg px-3 py-2 text-xs font-semibold" type="button" data-set-state="acquire">Source</button><button class="rounded-lg px-3 py-2 text-xs font-semibold" type="button" data-set-state="processing">Processing</button><button class="rounded-lg px-3 py-2 text-xs font-semibold" type="button" data-set-state="review">Draft</button><button class="rounded-lg px-3 py-2 text-xs font-semibold" type="button" data-set-state="failure">Failure</button></div>
+        <div class="p-3"><button class="rounded-full bg-coral px-4 py-2 text-xs font-semibold text-white disabled:opacity-40" type="button" data-save-button data-set-state="saved" disabled>Commit reviewed facts</button></div>
+      </div>
+      <div class="grid min-h-[38rem] lg:grid-cols-[16rem_minmax(0,1fr)_20rem]">
+        <aside class="border-b border-ink/10 bg-sand/60 p-5 lg:border-b-0 lg:border-r">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Source</p><div class="mt-4 rounded-2xl border border-ink/10 bg-white p-4 text-sm"><strong data-source-name>alex-morgan-resume.pdf</strong><p class="mt-2 text-xs leading-5 text-ink/50" data-source-meta>8 pages · text PDF · ready</p></div><button class="mt-4 text-sm font-semibold text-coral" type="button" data-set-state="acquire">Replace source</button><div class="mt-8 border-t border-ink/10 pt-5"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Protection</p><p class="mt-3 text-xs leading-5 text-ink/60">Request-only processing<br>No source document retained<br>No writes before commit</p></div>
+        </aside>
+        <main class="p-5 sm:p-8">
+          <div data-stage-panel="acquire"><h3 class="font-display text-3xl font-semibold" data-acquire-title>Bring a resume, or start by hand.</h3><p class="mt-3 text-sm leading-6 text-ink/60" data-acquire-copy>We extract source facts only. Nothing is added until commit.</p><div class="mt-6 rounded-2xl border-2 border-dashed border-ink/15 p-8 text-center" data-upload-panel><button class="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Select sample document</button></div><div class="mt-6 hidden" data-url-panel><input class="w-full rounded-xl border border-ink/20 bg-white px-4 py-3" type="url" value="https://jobs.example.com/platform-engineer"><button class="mt-3 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Acquire posting</button></div><button class="mt-5 text-sm font-semibold text-coral" type="button" data-manual-fallback>Open empty manual form</button></div>
+          <div data-stage-panel="processing" hidden><div class="rounded-2xl border border-ink/10 bg-white p-5"><div class="h-2 w-2/3 animate-pulse rounded bg-coral"></div><p class="mt-4 font-semibold">Extracting bounded source text</p><p class="mt-2 text-sm text-ink/55">The draft will appear in the right workspace without changing saved data.</p></div><button class="mt-6 rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="review">Complete extraction</button></div>
+          <div data-stage-panel="review" hidden><div class="flex items-center justify-between"><h3 class="font-display text-3xl font-semibold">Proposed facts</h3><span class="text-xs font-semibold text-coral">2 unresolved</span></div><div class="mt-6 grid gap-4"><label class="text-xs font-semibold uppercase tracking-[0.14em] text-ink/50">Role title<input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3 text-base font-normal normal-case tracking-normal text-ink" value="Senior Platform Engineer"></label><label class="text-xs font-semibold uppercase tracking-[0.14em] text-ink/50">Summary<textarea class="mt-2 min-h-28 w-full rounded-xl border border-ink/20 bg-white px-4 py-3 text-base font-normal normal-case tracking-normal text-ink">Platform engineer building reliable developer tools.</textarea></label><div class="rounded-xl border border-coral/30 bg-white p-4"><p class="text-sm font-semibold">Resolve “platform ops”</p><div class="mt-3 flex flex-wrap gap-2"><button class="rounded-full border border-ink/15 px-3 py-2 text-xs font-semibold" type="button" data-add-correction>Platform engineering</button><button class="rounded-full border border-ink/15 px-3 py-2 text-xs font-semibold" type="button" data-add-correction>Create concept</button><button class="rounded-full border border-ink/15 px-3 py-2 text-xs font-semibold" type="button" data-add-correction>Omit</button></div></div></div></div>
+          <div data-stage-panel="failure" hidden><div class="border-l-4 border-coral pl-5"><h3 class="font-display text-3xl font-semibold">Acquisition unavailable</h3><p class="mt-3 text-sm leading-6 text-ink/60">The source was not retained and saved records are unchanged.</p></div><div class="mt-6 flex gap-3"><button class="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white" type="button" data-set-state="acquire">Replace source</button><button class="rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold" type="button" data-manual-fallback>Paste manually</button></div></div>
+          <div data-stage-panel="saved" hidden><h3 class="font-display text-3xl font-semibold">Commit complete</h3><p class="mt-3 text-sm text-ink/60" data-saved-copy>The reviewed facts are now saved.</p></div>
+        </main>
+        <aside class="border-t border-ink/10 bg-white p-5 lg:border-l lg:border-t-0">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Commit check</p><dl class="mt-5 space-y-4 text-sm"><div><dt class="text-ink/50">Saved records</dt><dd class="mt-1 font-semibold" data-impact-title>None changed yet</dd></div><div><dt class="text-ink/50">Draft scope</dt><dd class="mt-1 font-semibold">Complete replacement</dd></div><div><dt class="text-ink/50">Corrections</dt><dd class="mt-1 font-semibold"><span data-correction-count>0</span> made</dd></div></dl><label class="mt-8 flex gap-3 rounded-xl bg-sand p-3 text-xs"><input class="mt-0.5" type="checkbox" data-consent-checkbox><span>Allow this one-time AI import using the displayed source.</span></label><p class="mt-5 text-xs leading-5 text-ink/55" data-impact-copy>You will see all proposed facts before commit.</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section data-variant="C" hidden>
+    <div class="mx-auto max-w-3xl">
+      <div class="mb-6"><p class="text-xs font-semibold uppercase tracking-[0.2em] text-coral">Variant C</p><h2 class="mt-1 font-display text-3xl font-semibold">Checkpoint conversation</h2><p class="mt-2 text-sm text-ink/60">A transparent event trail with explicit checkpoints. Best when trust and replacement impact need emphasis.</p></div>
+      <div class="space-y-4">
+        <article class="rounded-3xl border border-ink/10 bg-cream p-6 sm:p-8"><div class="flex gap-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white">1</span><div class="min-w-0 flex-1"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-coral">You choose the source</p><h3 class="mt-2 font-display text-2xl font-semibold" data-acquire-title>Bring a resume, or start by hand.</h3><p class="mt-2 text-sm leading-6 text-ink/60" data-acquire-copy>We extract source facts only.</p><div class="mt-5" data-upload-panel><button class="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Use sample document</button></div><div class="mt-5 hidden" data-url-panel><input class="w-full rounded-xl border border-ink/20 bg-white px-4 py-3" type="url" value="https://jobs.example.com/platform-engineer"><button class="mt-3 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white" type="button" data-set-state="processing">Use this posting</button></div><button class="ml-3 mt-5 text-sm font-semibold text-coral" type="button" data-manual-fallback>Continue manually</button></div></div></article>
+        <article class="rounded-3xl border border-ink/10 bg-cream p-6 opacity-50 transition sm:p-8" data-checkpoint="processing"><div class="flex gap-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white">2</span><div><p class="text-xs font-semibold uppercase tracking-[0.16em] text-coral">ApplyKit processes once</p><h3 class="mt-2 font-display text-2xl font-semibold" data-processing-title>Reading source facts...</h3><p class="mt-2 text-sm leading-6 text-ink/60">Bounded text goes to the configured AI route. The document and draft are not durably stored.</p><div class="mt-4 flex gap-3"><button class="text-sm font-semibold text-coral" type="button" data-set-state="review">Simulate success</button><button class="text-sm font-semibold text-ink/55" type="button" data-set-state="failure">Simulate failure</button></div></div></div></article>
+        <article class="rounded-3xl border border-ink/10 bg-cream p-6 opacity-50 transition sm:p-8" data-checkpoint="review"><div class="flex gap-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-sm font-semibold text-white">3</span><div class="min-w-0 flex-1"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-coral">You remain the editor</p><h3 class="mt-2 font-display text-2xl font-semibold">Review the complete draft</h3><p class="mt-2 text-sm leading-6 text-ink/60" data-impact-copy>No saved record changes until the final checkpoint.</p><div class="mt-5 grid gap-3 sm:grid-cols-3"><button class="rounded-xl bg-sand p-4 text-left text-sm" type="button" data-add-correction><strong>Identity</strong><br><span class="text-xs text-ink/50">Review 4 facts</span></button><button class="rounded-xl bg-sand p-4 text-left text-sm" type="button" data-add-correction><strong>Experience</strong><br><span class="text-xs text-ink/50">Review 3 entries</span></button><button class="rounded-xl border border-coral/30 bg-white p-4 text-left text-sm" type="button" data-add-correction><strong>Skills</strong><br><span class="text-xs text-coral">Resolve 2</span></button></div></div></div></article>
+        <article class="rounded-3xl border border-coral/30 bg-cream p-6 opacity-50 transition sm:p-8" data-checkpoint="saved"><div class="flex gap-4"><span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-coral text-sm font-semibold text-white">4</span><div class="min-w-0 flex-1"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-coral">Final checkpoint</p><h3 class="mt-2 font-display text-2xl font-semibold" data-impact-title>Save a new Candidate Profile</h3><p class="mt-2 text-sm leading-6 text-ink/60" data-impact-copy>Your draft will become saved data only after confirmation.</p><label class="mt-5 flex gap-3 rounded-xl bg-sand p-4 text-sm"><input class="mt-1" type="checkbox" data-consent-checkbox><span>I consent to this one-time import and have reviewed the proposed facts.</span></label><button class="mt-5 rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white disabled:opacity-40" type="button" data-save-button data-set-state="saved" disabled>Confirm and save atomically</button></div></div></article>
+        <article class="rounded-3xl border border-coral/30 bg-white p-6 sm:p-8" data-failure-card hidden><p class="text-xs font-semibold uppercase tracking-[0.16em] text-coral">Safe stop</p><h3 class="mt-2 font-display text-2xl font-semibold">The route ends here, not in partial data.</h3><p class="mt-2 text-sm leading-6 text-ink/60">Nothing changed. Return to the source checkpoint, or continue with an empty manual form.</p><div class="mt-4 flex gap-3"><button class="text-sm font-semibold text-coral" type="button" data-set-state="acquire">Try again</button><button class="text-sm font-semibold text-ink/60" type="button" data-manual-fallback>Continue manually</button></div></article>
+      </div>
+    </div>
+  </section>
+</section>
+
+<div class="fixed inset-x-0 bottom-4 z-50 mx-auto flex w-fit items-center gap-4 rounded-full bg-ink px-3 py-2 text-sm font-semibold text-white shadow-2xl" data-variant-switcher>
+  <button class="flex size-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" type="button" data-variant-previous aria-label="Previous variant">&larr;</button>
+  <span class="min-w-44 text-center" data-variant-label>A — Guided handoff</span>
+  <button class="flex size-9 items-center justify-center rounded-full bg-white/10 hover:bg-white/20" type="button" data-variant-next aria-label="Next variant">&rarr;</button>
+</div>
+<script src="{% static 'js/import_journeys_prototype.js' %}"></script>
+{% endblock %}

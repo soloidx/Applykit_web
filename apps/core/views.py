@@ -16,6 +16,10 @@ def home(request: HttpRequest) -> HttpResponse:
     return render(request, "core/home.html")
 
 
+def import_journeys_prototype(request: HttpRequest) -> HttpResponse:
+    return render(request, "core/import_journeys_prototype.html")
+
+
 @login_required
 @verified_account_required
 def dashboard(request: HttpRequest) -> HttpResponse:
