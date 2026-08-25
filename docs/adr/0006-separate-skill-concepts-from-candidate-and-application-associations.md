@@ -1,6 +1,6 @@
 # ADR-0006: Separate skill concepts from candidate and application associations
 
-- Status: Accepted
+- Status: Superseded by ADR-0009
 - Date: 2026-08-13
 
 ## Context
