@@ -49,15 +49,17 @@ Do not shorten this term to CV when referring to the source data. A Resume is an
 
 ### Skill Concept
 
-A globally shared canonical identity for one public hard skill, such as `Node.js`. A Skill Concept has a preferred canonical name and deterministic aliases such as `nodejs` and `NodeJS`. Its stable identifier, not its canonical name, is the matching identity because names and aliases may be corrected or merged later.
+A globally shared canonical identity for one public hard skill, such as `Node.js`. A Skill Concept has a preferred canonical name. Its stable identifier, not its canonical name, is the matching identity because names may be corrected or concepts merged later.
 
-The catalog includes technologies, tools, methods, certifications, and domain skills, but not soft traits. Version labels collapse into the broader capability rather than creating version-specific concepts. Any unknown candidate-entered hard-skill label creates a globally shared Skill Concept. This deliberately treats submitted skill names as public catalog data.
+The catalog includes technologies, tools, methods, certifications, and domain skills, but not soft traits. Version labels collapse into the broader capability rather than creating version-specific concepts. Any unknown candidate-entered or imported hard-skill label creates a globally shared Skill Concept. This deliberately treats submitted skill names as public catalog data.
 
-Exact normalized aliases resolve automatically. The MVP does not infer aliases from string similarity or an AI provider. Future automated semantic merges must retain aliases and stable references, and uncertain merges require review.
+A Skill Alias is globally shared wording for one Skill Concept. Each normalized alias belongs to exactly one concept and is the source of truth for resolving that wording. New known variants create aliases transparently through the skills domain. Deliberate administrative alias reassignment changes the effective concept for every Application Skill Requirement that references the alias and must be audited; referenced aliases are not hard-deleted.
+
+AI-assisted import may propose semantic mappings from locally verified source wording to canonical concepts and identify ambiguity. The skills domain reconciles those proposals with the current catalog, reuses the catalog mapping when it conflicts with a proposal, and records the discrepancy internally. Ambiguous mappings are not persisted until the candidate resolves or omits them.
 
 ### Candidate Skill Association
 
-A private assertion that a candidate used or possesses a Skill Concept. Profile Skills, Experience Skills, and Project Skills are independent lists: adding a skill in one location does not add it to another. Each association preserves the candidate's trimmed entered label for display, including its spelling, case, and punctuation, and may reference a Skill Concept only once within its location.
+A private assertion that a candidate used or possesses a Skill Concept. Profile Skills, Experience Skills, and Project Skills are independent lists: adding a skill in one location does not add it to another. Each association references a Skill Concept and displays its canonical name. A location may reference a Skill Concept only once.
 
 Candidate Skill Associations have display order but no proficiency, duration, or recency metadata in the MVP. Matching treats a concept as one binary capability even when it appears in several locations; repeated associations provide explanatory evidence but do not increase match strength.
 
@@ -87,7 +89,7 @@ Duplicate applications are allowed because a candidate may apply to the same Com
 
 ### Application Skill Requirement
 
-A private, candidate-editable hard-skill requirement attached to one Job Application and mapped to one shared Skill Concept. It preserves the trimmed extracted or entered label for display, including its spelling, case, and punctuation, and classifies the requirement as `Required` or `Preferred`.
+A private, candidate-editable hard-skill requirement attached to one Job Application through a shared Skill Alias. It displays the alias wording, derives its Skill Concept identity through that alias, and classifies the requirement as `Required` or `Preferred`. One Job Application may reference a Skill Concept only once, even when multiple source labels resolve to aliases for that concept.
 
 The candidate may add, edit, or remove requirements. Re-extracting requirements after a job-description change only adds newly found concepts; it does not remove requirements that are no longer present in the text.
 
@@ -157,6 +159,7 @@ The first release displays upcoming events on the dashboard and does not send re
 The active Django app boundaries are:
 
 - `accounts`: custom account model and django-allauth integration
+- `skills`: globally shared Skill Concepts and Skill Aliases
 - `profiles`: Candidate Profile and its ordered career-history records
 - `campaigns`: Campaign lifecycle, targets, and progress calculations
 - `applications`: Company, Job Application, Stage Transition, and Recruitment Event
