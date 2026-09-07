@@ -1,9 +1,24 @@
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Q
+
+_catalog_operation = ContextVar("skill_catalog_operation", default=False)
+
+
+@contextmanager
+def catalog_operation() -> Iterator[None]:
+    """Permit catalog wording mutations from transactional skills-domain operations."""
+    token = _catalog_operation.set(True)
+    try:
+        yield
+    finally:
+        _catalog_operation.reset(token)
 
 
 def normalize_skill_label(value: str) -> str:
@@ -35,6 +50,14 @@ class SkillConcept(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         self.canonical_name = clean_skill_label(self.canonical_name)
+        if not self._state.adding and not _catalog_operation.get():
+            persisted_name = (
+                SkillConcept._base_manager.filter(pk=self.pk)
+                .values_list("canonical_name", flat=True)
+                .first()
+            )
+            if persisted_name is not None and self.canonical_name != persisted_name:
+                raise ValidationError("Rename a skill concept through the skills-domain operation.")
         self.canonical_key = normalize_skill_label(self.canonical_name)
 
         adding = self._state.adding
@@ -78,5 +101,30 @@ class SkillAlias(models.Model):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         self.display_name = clean_skill_label(self.display_name)
-        self.normalized_value = normalize_skill_label(self.display_name)
+        normalized_value = normalize_skill_label(self.display_name)
+        if not self._state.adding and not _catalog_operation.get():
+            persisted = (
+                SkillAlias._base_manager.filter(pk=self.pk)
+                .values_list("is_canonical", "normalized_value", "concept_id")
+                .first()
+            )
+            if persisted is not None:
+                persisted_canonical, persisted_value, persisted_concept_id = persisted
+                if self.is_canonical != persisted_canonical:
+                    raise ValidationError(
+                        "Change a canonical skill alias through the skills-domain operation."
+                    )
+                if normalized_value != persisted_value:
+                    if persisted_canonical:
+                        raise ValidationError(
+                            "Rename the skill concept instead of editing its canonical alias."
+                        )
+                    raise ValidationError(
+                        "Correct a skill alias through the skills-domain operation."
+                    )
+                if self.concept_id != persisted_concept_id:
+                    raise ValidationError(
+                        "Reassign a skill alias through its dedicated skills-domain operation."
+                    )
+        self.normalized_value = normalized_value
         super().save(*args, **kwargs)
