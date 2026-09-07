@@ -133,3 +133,20 @@ DOCUMENT_EXTRACTION = {
 # requires renewed consent. Operators change it only for a material policy
 # change; callers and candidates cannot override it.
 AI_CONSENT = {"POLICY": env("AI_CONSENT_POLICY", default="2026-09-initial-ai-imports")}
+
+# AI import operations. One qualified model per task, the provider endpoint
+# and credential, the total deadline, attempt bound, token bounds, and the
+# per-request price ceiling. An empty credential or model disables the
+# feature and every operation fails closed; callers cannot override these
+# values. The per-request price ceiling is in dollars.
+AI_IMPORTS = {
+    "BASE_URL": env("AI_IMPORTS_BASE_URL", default="https://openrouter.ai/api/v1"),
+    "API_KEY": env("AI_IMPORTS_API_KEY", default=""),
+    "DEADLINE_SECONDS": 60.0,
+    "MAX_ATTEMPTS": 2,
+    "MAX_INPUT_TOKENS": 60_000,
+    "MAX_OUTPUT_TOKENS": 8_000,
+    "PRICE_CEILING": 0.50,
+    "PROFILE_MODEL": env("AI_IMPORTS_PROFILE_MODEL", default=""),
+    "POSTING_MODEL": env("AI_IMPORTS_POSTING_MODEL", default=""),
+}

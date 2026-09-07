@@ -25,3 +25,38 @@ class ConsentPreference(models.Model):
 
     def __str__(self) -> str:
         return f"{self.account.email}: {'accepted' if self.accepted else 'not accepted'}"
+
+
+class AIOperationAudit(models.Model):
+    """One content-free audit record per logical AI operation.
+
+    The record holds only safe identifiers and aggregate figures: the
+    Account, the feature, the consent-policy identifier, the safe outcome
+    category, the actual route/model, aggregate token usage, and aggregate
+    cost. Source text, prompts, raw outputs, and extracted values are never
+    recorded. Account deletion cascades the audits.
+    """
+
+    OUTCOME_SUCCESS = "success"
+
+    class Meta:
+        verbose_name = "AI operation audit"
+        verbose_name_plural = "AI operation audits"
+
+    account = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ai_operation_audits",
+    )
+    feature = models.CharField(max_length=64)
+    consent_policy = models.CharField(max_length=64)
+    outcome = models.CharField(max_length=32)
+    model = models.CharField(max_length=200, blank=True)
+    route = models.CharField(max_length=200, blank=True)
+    prompt_tokens = models.PositiveIntegerField(default=0)
+    completion_tokens = models.PositiveIntegerField(default=0)
+    cost = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.account.email} {self.feature}: {self.outcome}"
