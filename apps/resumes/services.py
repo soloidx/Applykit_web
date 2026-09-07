@@ -228,14 +228,13 @@ def build_resume_default_draft(*, account: Account, application_id: int) -> dict
         for experience in profile.experiences.order_by("position", "id")
         for highlight in experience.highlights.order_by("position", "id")
     ]
-    labels = _labels_by_concept(profile)
     concept_ids = _skill_initialization_order(application, profile)
     skill_rows = [
         {
             "source_id": concept_id,
             "included": True,
             "position": position,
-            "label_override": labels.get(concept_id, ""),
+            "label_override": "",
         }
         for position, concept_id in enumerate(concept_ids)
     ]
@@ -350,15 +349,6 @@ def _effective(override: Any, source: Any) -> Any:
     return source if override is None else override
 
 
-def _labels_by_concept(profile: CandidateProfile) -> dict[int, str]:
-    profile_skills, experience_skills, project_skills = _source_skills(profile)
-    labels: dict[int, str] = {}
-    for skills in (profile_skills, experience_skills, project_skills):
-        for skill in skills:
-            labels.setdefault(skill.concept_id, skill.label)
-    return labels
-
-
 def _render_experiences(resume: Resume, profile: CandidateProfile) -> tuple[dict[str, Any], ...]:
     items: list[dict[str, Any]] = []
     overlays = resume.experiences.select_related("experience").prefetch_related("highlights").all()
@@ -470,16 +460,12 @@ def build_resume_document(*, account: Account, resume: Resume) -> ResumeDocument
         }
         for overlay in resume.languages.select_related("language").filter(included=True)
     )
-    labels = _labels_by_concept(profile)
     skills = tuple(
         {
             "source": overlay.concept,
             "included": overlay.included,
             "position": overlay.position,
-            "label": _effective(
-                overlay.label_override,
-                labels.get(overlay.concept_id, ""),
-            ),
+            "label": _effective(overlay.label_override, overlay.concept.canonical_name),
         }
         for overlay in resume.skills.select_related("concept").filter(included=True)
     )

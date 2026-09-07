@@ -61,16 +61,28 @@ def calculate_skill_coverage(
             SkillEvidence(location=location, label=label)
         )
 
-    for profile_skill in candidate_profile.profile_skills.all():
-        add_evidence(profile_skill.concept_id, "Profile skills", profile_skill.label)
-    for experience in candidate_profile.experiences.prefetch_related("experience_skills"):
+    for profile_skill in candidate_profile.profile_skills.select_related("concept").all():
+        add_evidence(
+            profile_skill.concept_id,
+            "Profile skills",
+            profile_skill.concept.canonical_name,
+        )
+    for experience in candidate_profile.experiences.prefetch_related("experience_skills__concept"):
         location = f"Experience: {experience.role} at {experience.organization}"
         for experience_skill in experience.experience_skills.all():
-            add_evidence(experience_skill.concept_id, location, experience_skill.label)
-    for project in candidate_profile.projects.prefetch_related("project_skills"):
+            add_evidence(
+                experience_skill.concept_id,
+                location,
+                experience_skill.concept.canonical_name,
+            )
+    for project in candidate_profile.projects.prefetch_related("project_skills__concept"):
         location = f"Project: {project.name}"
         for project_skill in project.project_skills.all():
-            add_evidence(project_skill.concept_id, location, project_skill.label)
+            add_evidence(
+                project_skill.concept_id,
+                location,
+                project_skill.concept.canonical_name,
+            )
 
     coverage: dict[str, list[SkillCoverageItem]] = {
         "matched_required": [],

@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 
-from apps.skills.models import SkillConcept, clean_skill_label
+from apps.skills.models import SkillConcept
 
 IANA_TIMEZONES = frozenset(available_timezones())
 
@@ -103,7 +103,6 @@ class ExperienceSkill(models.Model):
         on_delete=models.PROTECT,
         related_name="experience_skills",
     )
-    label = models.CharField(max_length=200)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -113,17 +112,12 @@ class ExperienceSkill(models.Model):
                 fields=["experience", "concept"],
                 name="experience_skill_unique_concept",
             ),
-            models.CheckConstraint(
-                condition=~Q(label=""),
-                name="experience_skill_label_not_blank",
-            ),
         ]
 
     def __str__(self) -> str:
-        return self.label
+        return self.concept.canonical_name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = clean_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_experience_skill = (
                 ExperienceSkill.objects.filter(experience=self.experience)
@@ -235,7 +229,6 @@ class ProjectSkill(models.Model):
         on_delete=models.PROTECT,
         related_name="project_skills",
     )
-    label = models.CharField(max_length=200)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -245,17 +238,12 @@ class ProjectSkill(models.Model):
                 fields=["project", "concept"],
                 name="project_skill_unique_concept",
             ),
-            models.CheckConstraint(
-                condition=~Q(label=""),
-                name="project_skill_label_not_blank",
-            ),
         ]
 
     def __str__(self) -> str:
-        return self.label
+        return self.concept.canonical_name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = clean_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_project_skill = (
                 ProjectSkill.objects.filter(project=self.project)
@@ -277,7 +265,6 @@ class ProfileSkill(models.Model):
         on_delete=models.PROTECT,
         related_name="profile_skills",
     )
-    label = models.CharField(max_length=200)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -288,21 +275,12 @@ class ProfileSkill(models.Model):
                 fields=["profile", "concept"],
                 name="profile_skill_unique_concept",
             ),
-            models.CheckConstraint(
-                condition=~Q(label=""),
-                name="profile_skill_label_not_blank",
-            ),
         ]
 
     def __str__(self) -> str:
-        return self.label
+        return self.concept.canonical_name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = clean_skill_label(self.label)
-        if self.concept_id is None:
-            from apps.skills.services import resolve_skill_label
-
-            self.concept, _ = resolve_skill_label(self.label)
         if self._state.adding and self.position == 0:
             last_skill = (
                 ProfileSkill.objects.filter(profile=self.profile)

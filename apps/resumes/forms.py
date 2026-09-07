@@ -7,7 +7,6 @@ from apps.profiles.models import (
     CandidateProfile,
     ExperienceSkill,
     Language,
-    ProfileSkill,
     ProjectSkill,
 )
 from apps.resumes.models import Resume, ResumeSection
@@ -531,34 +530,24 @@ def build_resume_forms(
         if concept_id not in existing_skill_order
     ]
     concepts = {concept.pk: concept for concept in SkillConcept.objects.filter(pk__in=concept_ids)}
-    labels: dict[int, str] = {}
-    for skills in (
-        ProfileSkill.objects.filter(profile=profile).order_by("position", "id"),
-        ExperienceSkill.objects.filter(experience__profile=profile).order_by(
-            "experience__position", "experience__id", "position", "id"
-        ),
-        ProjectSkill.objects.filter(project__profile=profile).order_by(
-            "project__position", "project__id", "position", "id"
-        ),
-    ):
-        for skill in skills:
-            labels.setdefault(skill.concept_id, skill.label)
-    initial_skills = [
-        {
-            "source_id": concept.pk,
-            "included": concept_id in skill_overlays and skill_overlays[concept_id].included,
-            "position": skill_overlays[concept_id].position
-            if concept_id in skill_overlays
-            else index,
-            "label_override": labels.get(concept_id, concept.canonical_name),
-            "label_override_inherit": (
-                concept_id not in skill_overlays
-                or skill_overlays[concept_id].label_override is None
-            ),
-        }
-        for index, concept_id in enumerate(skill_order)
-        if (concept := concepts.get(concept_id)) is not None
-    ]
+    initial_skills = []
+    for index, concept_id in enumerate(skill_order):
+        if (concept := concepts.get(concept_id)) is None:
+            continue
+        overlay = skill_overlays.get(concept_id)
+        initial_skills.append(
+            {
+                "source_id": concept.pk,
+                "included": overlay is not None and overlay.included,
+                "position": overlay.position if overlay is not None else index,
+                "label_override": (
+                    overlay.label_override
+                    if overlay is not None and overlay.label_override is not None
+                    else concept.canonical_name
+                ),
+                "label_override_inherit": overlay is None or overlay.label_override is None,
+            }
+        )
     initial_highlights = []
     highlight_overlays = {
         (item.experience_id, child.highlight_id): child

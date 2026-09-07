@@ -43,6 +43,7 @@ from apps.resumes.models import (
 )
 from apps.resumes.services import build_resume_default_draft, build_resume_document, open_resume
 from apps.skills.models import SkillConcept
+from apps.skills.services import rename_skill_concept
 
 pytestmark = pytest.mark.integration
 
@@ -98,13 +99,12 @@ def profile_sources(account: Account) -> dict[str, object]:
         name="English",
         proficiency=Language.Proficiency.NATIVE,
     )
-    profile_skill = ProfileSkill.objects.create(profile=profile, concept=concept, label="Django")
+    profile_skill = ProfileSkill.objects.create(profile=profile, concept=concept)
     experience_skill = ExperienceSkill.objects.create(
         experience=experience,
         concept=concept,
-        label="Django",
     )
-    project_skill = ProjectSkill.objects.create(project=project, concept=concept, label="Django")
+    project_skill = ProjectSkill.objects.create(project=project, concept=concept)
     return {
         "concept": concept,
         "experience": experience,
@@ -435,23 +435,15 @@ def test_open_resume_initializes_sections_membership_and_deterministic_skills_on
         location="London",
         start_date="2021-01-01",
     )
-    ExperienceSkill.objects.create(
-        experience=first_experience, concept=required_high_evidence, label="Python"
-    )
-    ExperienceSkill.objects.create(experience=first_experience, concept=preferred, label="Postgres")
-    ExperienceSkill.objects.create(
-        experience=second_experience, concept=required_high_evidence, label="Python"
-    )
-    ExperienceSkill.objects.create(
-        experience=second_experience, concept=required_low_evidence, label="Django"
-    )
+    ExperienceSkill.objects.create(experience=first_experience, concept=required_high_evidence)
+    ExperienceSkill.objects.create(experience=first_experience, concept=preferred)
+    ExperienceSkill.objects.create(experience=second_experience, concept=required_high_evidence)
+    ExperienceSkill.objects.create(experience=second_experience, concept=required_low_evidence)
     first_project = Project.objects.create(profile=profile, name="First project")
     second_project = Project.objects.create(profile=profile, name="Second project")
-    ProjectSkill.objects.create(project=first_project, concept=unmatched, label="Rust")
-    ProjectSkill.objects.create(
-        project=second_project, concept=required_low_evidence, label="Django"
-    )
-    ProfileSkill.objects.create(profile=profile, concept=preferred, label="SQL")
+    ProjectSkill.objects.create(project=first_project, concept=unmatched)
+    ProjectSkill.objects.create(project=second_project, concept=required_low_evidence)
+    ProfileSkill.objects.create(profile=profile, concept=preferred)
 
     resume, created = open_resume(account=account, application_id=application.pk)
 
@@ -507,9 +499,9 @@ def test_resume_default_draft_rebuilds_current_sources_and_requirement_relevance
         location="London",
         start_date="2024-01-01",
     )
-    ExperienceSkill.objects.create(experience=experience, concept=required, label="Python")
+    ExperienceSkill.objects.create(experience=experience, concept=required)
     project = Project.objects.create(profile=profile, name="Current project")
-    ProjectSkill.objects.create(project=project, concept=required, label="Python")
+    ProjectSkill.objects.create(project=project, concept=required)
 
     draft = build_resume_default_draft(account=account, application_id=application.pk)
 
@@ -868,9 +860,8 @@ def test_experience_and_project_deletion_removes_only_stale_resume_skill_state()
     ExperienceSkill.objects.create(
         experience=experience,
         concept=experience_concept,
-        label="Python",
     )
-    ProjectSkill.objects.create(project=project, concept=project_concept, label="Django")
+    ProjectSkill.objects.create(project=project, concept=project_concept)
     application = application_for(account)
     resume, _created = open_resume(account=account, application_id=application.pk)
 
@@ -921,14 +912,13 @@ def test_new_highlights_flow_but_saved_exclusions_remain_sticky() -> None:
 
 
 @pytest.mark.django_db
-def test_skill_label_fallback_and_override_survive_association_removal() -> None:
+def test_skill_label_falls_back_to_canonical_name_and_override_survives_removal() -> None:
     account = verified_candidate("resume-skill-label-live@example.com")
     profile = account.candidate_profile
     concept = SkillConcept.objects.create(canonical_name="Python")
     profile_skill = ProfileSkill.objects.create(
         profile=profile,
         concept=concept,
-        label="Profile Python",
     )
     experience = Experience.objects.create(
         profile=profile,
@@ -940,18 +930,25 @@ def test_skill_label_fallback_and_override_survive_association_removal() -> None
     experience_skill = ExperienceSkill.objects.create(
         experience=experience,
         concept=concept,
-        label="Experience Python",
     )
     application = application_for(account)
     resume, _created = open_resume(account=account, application_id=application.pk)
     resume_skill = resume.skills.get(concept=concept)
+    client = Client()
+    client.force_login(account)
+
+    document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    assert document.skills[0]["label"] == "Python"
 
     delete_profile_skill(account=account, skill_id=profile_skill.pk)
     document = build_resume_document(
         account=account,
         resume=Resume.objects.get(pk=resume.pk),
     )
-    assert document.skills[0]["label"] == "Experience Python"
+    assert document.skills[0]["label"] == "Python"
 
     resume_skill.label_override = "Tailored Python"
     resume_skill.save(update_fields=["label_override"])
@@ -960,9 +957,57 @@ def test_skill_label_fallback_and_override_survive_association_removal() -> None
         resume=Resume.objects.get(pk=resume.pk),
     )
     assert document.skills[0]["label"] == "Tailored Python"
+
+    reloaded = Resume.objects.get(pk=resume.pk)
+    forms = build_resume_forms(resume=reloaded)
+    assert forms.skills[0].initial["label_override"] == "Tailored Python"
+    assert forms.skills[0].initial["label_override_inherit"] is False
+    assert (
+        client.post(
+            reverse("resume_save", args=[application.pk]),
+            modern_resume_post(reloaded, forms),
+        ).status_code
+        == 302
+    )
+    document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    assert document.skills[0]["label"] == "Tailored Python"
+
     delete_experience_skill(account=account, experience_skill_id=experience_skill.pk)
 
     assert not ResumeSkill.objects.filter(pk=resume_skill.pk).exists()
+
+
+@pytest.mark.django_db
+def test_resume_skills_inherit_canonical_name_and_follow_concept_renames() -> None:
+    account = verified_candidate("resume-skill-rename@example.com")
+    profile = account.candidate_profile
+    concept = SkillConcept.objects.create(canonical_name="Python")
+    ProfileSkill.objects.create(profile=profile, concept=concept)
+    application = application_for(account)
+    resume, _created = open_resume(account=account, application_id=application.pk)
+    client = Client()
+    client.force_login(account)
+    detail_response = client.get(reverse("resume_detail", args=[application.pk]))
+
+    rename_skill_concept(concept=concept, canonical_name="Python 3")
+    renamed_document = build_resume_document(
+        account=account,
+        resume=Resume.objects.get(pk=resume.pk),
+    )
+    renamed_detail = client.get(reverse("resume_detail", args=[application.pk]))
+    form = build_resume_forms(resume=Resume.objects.get(pk=resume.pk))
+
+    assert detail_response.status_code == 200
+    assert b">Python<" in detail_response.content
+    assert renamed_document.skills[0]["label"] == "Python 3"
+    assert b">Python 3<" in renamed_detail.content
+    assert form.skills[0].initial["label_override"] == "Python 3"
+    assert not ResumeSkill.objects.filter(
+        pk=resume.skills.get(concept=concept).pk, label_override__isnull=False
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -980,7 +1025,6 @@ def test_source_deletion_rolls_back_profile_and_resume_cleanup_together(
     skill = ExperienceSkill.objects.create(
         experience=experience,
         concept=SkillConcept.objects.create(canonical_name="Python"),
-        label="Python",
     )
     application = application_for(account)
     resume, _created = open_resume(account=account, application_id=application.pk)
@@ -1008,7 +1052,7 @@ def test_new_project_skill_appends_without_reordering_or_recomputing_relevance()
     profile = account.candidate_profile
     existing_concept = SkillConcept.objects.create(canonical_name="Python")
     new_concept = SkillConcept.objects.create(canonical_name="Django")
-    ProfileSkill.objects.create(profile=profile, concept=existing_concept, label="Python")
+    ProfileSkill.objects.create(profile=profile, concept=existing_concept)
     project = Project.objects.create(profile=profile, name="Toolkit")
     application = application_for(account)
     ApplicationSkillRequirement.objects.create(
@@ -1041,7 +1085,7 @@ def test_requirement_changes_do_not_rewrite_saved_resume_structure_without_reset
         location="London",
         start_date="2020-01-01",
     )
-    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    ExperienceSkill.objects.create(experience=experience, concept=concept)
     application = application_for(account)
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
@@ -1159,7 +1203,7 @@ def test_resume_detail_renders_source_rail_and_move_controls_markup() -> None:
         location="London",
         start_date="2020-01-01",
     )
-    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    ExperienceSkill.objects.create(experience=experience, concept=concept)
     application = application_for(account)
     Project.objects.create(profile=profile, name="Toolkit", description="A toolkit.")
     ApplicationSkillRequirement.objects.create(

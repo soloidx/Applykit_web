@@ -71,7 +71,7 @@ def _profile_context(
     return {
         "candidate_profile": candidate_profile,
         "experiences": candidate_profile.experiences.prefetch_related(
-            "highlights", "experience_skills"
+            "highlights", "experience_skills__concept"
         ),
         "experience_form": experience_form if experience_form is not None else ExperienceForm(),
         "experience_form_action": experience_form_action or reverse("experience_create"),
@@ -86,7 +86,7 @@ def _profile_context(
         "educations": candidate_profile.educations.all(),
         "education_form": education_form if education_form is not None else EducationForm(),
         "education_form_action": education_form_action or reverse("education_create"),
-        "projects": candidate_profile.projects.all(),
+        "projects": candidate_profile.projects.prefetch_related("project_skills__concept"),
         "project_form": project_form if project_form is not None else ProjectForm(),
         "project_form_action": project_form_action or reverse("project_create"),
         "project_skill_form": project_skill_form
@@ -94,7 +94,7 @@ def _profile_context(
         else SkillAssociationForm(),
         "project_skill_project": project_skill_project,
         "project": project_skill_project,
-        "skills": candidate_profile.profile_skills.all(),
+        "skills": candidate_profile.profile_skills.select_related("concept"),
         "skill_form": skill_form if skill_form is not None else SkillAssociationForm(),
         "skill_form_action": skill_form_action or reverse("skill_create"),
         "languages": candidate_profile.languages.all(),

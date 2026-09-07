@@ -96,7 +96,7 @@ def create_document_sources(*, account: Account) -> SkillConcept:
         proficiency=Language.Proficiency.NATIVE,
     )
     concept = SkillConcept.objects.create(canonical_name="Python")
-    ProfileSkill.objects.create(profile=profile, concept=concept, label="Python")
+    ProfileSkill.objects.create(profile=profile, concept=concept)
     return concept
 
 

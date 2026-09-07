@@ -33,7 +33,7 @@ from apps.profiles.services import (
     delete_project_skill,
 )
 from apps.skills.models import SkillAlias, SkillConcept
-from apps.skills.services import resolve_skill_label
+from apps.skills.services import rename_skill_concept, resolve_skill_label
 
 pytestmark = pytest.mark.integration
 
@@ -352,7 +352,7 @@ def test_skill_association_services_are_account_scoped_and_normalize_after_delet
         label="Rust",
     )
 
-    assert profile_skill.label == "Python"
+    assert profile_skill.concept.canonical_name == "Python"
     assert profile_skill.position == 0
     assert experience_skill.position == 0
     assert project_skill.position == 0
@@ -780,12 +780,12 @@ def test_candidate_can_add_a_project_skill_through_the_shared_catalog() -> None:
     assert response.status_code == 302
     assert response.url == reverse("profile")
     project_skill = ProjectSkill.objects.get(project=project)
-    assert project_skill.label == "NodeJS"
     assert project_skill.concept_id == concept.pk
     assert project_skill.position == 0
     profile_response = client.get(reverse("profile"))
     assert b"Legacy technologies" not in profile_response.content
-    assert b"NodeJS" in profile_response.content
+    assert b"Node.js" in profile_response.content
+    assert b"NodeJS" not in profile_response.content
 
 
 @pytest.mark.django_db
@@ -835,14 +835,16 @@ def test_project_skills_resolve_aliases_create_unknown_concepts_and_are_unique_p
     assert ProjectSkill.objects.filter(project=first_project, concept=concept).count() == 1
     assert ProjectSkill.objects.filter(project=second_project, concept=concept).count() == 1
     assert (
-        ProjectSkill.objects.get(project=first_project, label="Elixir").concept.canonical_name
+        ProjectSkill.objects.get(
+            project=first_project, concept__canonical_name="Elixir"
+        ).concept.canonical_name
         == "Elixir"
     )
     assert SkillConcept.objects.count() == catalog_count_before_blank
 
 
 @pytest.mark.django_db
-def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on_edit() -> None:
+def test_project_skills_can_reorder_and_delete_with_htmx_feedback() -> None:
     account = verified_account("project-skill-management@example.com")
     profile = create_profile(account)
     project = Project.objects.create(
@@ -875,7 +877,10 @@ def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on
     assert edit_response.headers["HX-Redirect"] == reverse("profile")
     assert reorder_response.url == reverse("profile")
     assert htmx_reorder_response.headers["HX-Redirect"] == reverse("profile")
-    assert list(project.project_skills.values_list("label", flat=True)) == ["Python", "Django"]
+    assert list(project.project_skills.values_list("concept__canonical_name", flat=True)) == [
+        "Python",
+        "Django",
+    ]
 
     delete_response = client.post(
         reverse("project_skill_delete", args=[first.pk]),
@@ -884,7 +889,9 @@ def test_project_skills_can_reorder_delete_with_htmx_and_preserve_legacy_text_on
 
     project.refresh_from_db()
     assert delete_response.headers["HX-Redirect"] == reverse("profile")
-    assert list(project.project_skills.values_list("label", flat=True)) == ["Django"]
+    assert list(project.project_skills.values_list("concept__canonical_name", flat=True)) == [
+        "Django"
+    ]
     assert project.project_skills.get().position == 0
 
 
@@ -899,7 +906,6 @@ def test_project_skill_mutations_cannot_cross_account_boundaries() -> None:
     project_skill = ProjectSkill.objects.create(
         project=project,
         concept=concept,
-        label="Python",
         position=0,
     )
     client = Client()
@@ -917,7 +923,7 @@ def test_project_skill_mutations_cannot_cross_account_boundaries() -> None:
         response = client.post(url, data)
         assert response.status_code == 404
 
-    assert ProjectSkill.objects.get(pk=project_skill.pk).label == "Python"
+    assert ProjectSkill.objects.get(pk=project_skill.pk).concept.canonical_name == "Python"
 
 
 @pytest.mark.django_db
@@ -926,7 +932,7 @@ def test_deleting_a_project_removes_private_project_skills_but_not_catalog_data(
     profile = create_profile(account)
     project = Project.objects.create(profile=profile, name="Disposable project")
     concept, _ = resolve_skill_label("Python")
-    ProjectSkill.objects.create(project=project, concept=concept, label="Python")
+    ProjectSkill.objects.create(project=project, concept=concept)
     client = Client()
     client.force_login(account)
 
@@ -1064,7 +1070,7 @@ def test_candidate_can_manage_ordered_unique_skills() -> None:
     assert whitespace_response.status_code == 200
     assert b"Enter a hard-skill label." in whitespace_response.content
     assert b"already" in duplicate_response.content
-    assert list(ProfileSkill.objects.values_list("label", flat=True)) == [
+    assert list(ProfileSkill.objects.values_list("concept__canonical_name", flat=True)) == [
         "Python",
         "Django",
         "Rust",
@@ -1090,12 +1096,12 @@ def test_candidate_can_manage_ordered_unique_skills() -> None:
     assert htmx_reorder_response.headers["HX-Redirect"] == reverse("profile")
     assert full_page_delete_response.url == reverse("profile")
     assert htmx_delete_response.headers["HX-Redirect"] == reverse("profile")
-    assert list(ProfileSkill.objects.values_list("label", flat=True)) == ["Rust"]
+    assert list(ProfileSkill.objects.values_list("concept__canonical_name", flat=True)) == ["Rust"]
     assert ProfileSkill.objects.get().position == 0
 
 
 @pytest.mark.django_db
-def test_experience_skills_resolve_aliases_preserve_labels_and_stay_independent() -> None:
+def test_experience_skills_resolve_aliases_display_canonical_names_and_stay_independent() -> None:
     account = verified_account("experience-skill-catalog@example.com")
     profile = create_profile(account)
     first_experience = Experience.objects.create(
@@ -1127,9 +1133,9 @@ def test_experience_skills_resolve_aliases_preserve_labels_and_stay_independent(
 
     assert first_response.url == reverse("profile")
     assert second_response.headers["HX-Redirect"] == reverse("profile")
-    assert list(ExperienceSkill.objects.values_list("experience_id", "label", "concept_id")) == [
-        (first_experience.pk, "NodeJS", concept.pk),
-        (second_experience.pk, "Elixir", SkillConcept.objects.get(canonical_key="elixir").pk),
+    assert list(ExperienceSkill.objects.values_list("experience_id", "concept_id")) == [
+        (first_experience.pk, concept.pk),
+        (second_experience.pk, SkillConcept.objects.get(canonical_key="elixir").pk),
     ]
     assert not ProfileSkill.objects.filter(profile=profile).exists()
 
@@ -1201,7 +1207,9 @@ def test_experience_skills_support_duplicate_feedback_blank_validation_and_order
     assert delete_response.headers["HX-Redirect"] == reverse("profile")
     assert profile_response.status_code == 200
     assert b"Experience skills" in profile_response.content
-    assert list(experience.experience_skills.values_list("label", flat=True)) == ["Django"]
+    assert list(experience.experience_skills.values_list("concept__canonical_name", flat=True)) == [
+        "Django"
+    ]
     assert experience.experience_skills.get().position == 0
 
 
@@ -1238,11 +1246,9 @@ def test_experience_skills_can_repeat_a_concept_across_experiences_and_profile()
     profile_response = client.get(reverse("profile"))
     assert ExperienceSkill.objects.filter(concept=concept).count() == 2
     assert ProfileSkill.objects.get(profile=profile).concept_id == concept.pk
-    assert list(first_experience.experience_skills.values_list("label", flat=True)) == ["Python"]
-    assert list(second_experience.experience_skills.values_list("label", flat=True)) == ["python"]
-    assert profile_response.content.count(b">Python</span>") == 1
-    assert profile_response.content.count(b">python</span>") == 1
-    assert profile_response.content.count(b">PYTHON</span>") == 1
+    assert profile_response.content.count(b">Python</span>") == 3
+    assert b">python</span>" not in profile_response.content
+    assert b">PYTHON</span>" not in profile_response.content
 
 
 @pytest.mark.django_db
@@ -1261,7 +1267,6 @@ def test_experience_skill_mutations_cannot_cross_account_boundaries() -> None:
     experience_skill = ExperienceSkill.objects.create(
         experience=experience,
         concept=concept,
-        label="Python",
         position=0,
     )
     client = Client()
@@ -1279,7 +1284,7 @@ def test_experience_skill_mutations_cannot_cross_account_boundaries() -> None:
         response = client.post(url, data)
         assert response.status_code == 404
 
-    assert ExperienceSkill.objects.get(pk=experience_skill.pk).label == "Python"
+    assert ExperienceSkill.objects.get(pk=experience_skill.pk).concept.canonical_name == "Python"
 
 
 @pytest.mark.django_db
@@ -1294,7 +1299,7 @@ def test_deleting_an_experience_or_account_removes_private_experience_skills_onl
     )
     concept, _ = resolve_skill_label("Python")
     alias = SkillAlias.objects.create(concept=concept, display_name="py")
-    ExperienceSkill.objects.create(experience=experience, concept=concept, label="Python")
+    ExperienceSkill.objects.create(experience=experience, concept=concept)
     client = Client()
     client.force_login(account)
 
@@ -1312,7 +1317,7 @@ def test_deleting_an_experience_or_account_removes_private_experience_skills_onl
         organization="Private Company",
         start_date="2020-01-01",
     )
-    ExperienceSkill.objects.create(experience=second_experience, concept=concept, label="Python")
+    ExperienceSkill.objects.create(experience=second_experience, concept=concept)
 
     deletion_client = Client()
     deletion_client.force_login(account_to_delete)
@@ -1325,7 +1330,7 @@ def test_deleting_an_experience_or_account_removes_private_experience_skills_onl
 
 
 @pytest.mark.django_db
-def test_profile_skills_resolve_catalog_aliases_and_preserve_entered_labels() -> None:
+def test_profile_skills_resolve_catalog_aliases_and_display_canonical_names() -> None:
     account = verified_account("profile-skill-catalog@example.com")
     profile = create_profile(account)
     concept = SkillConcept.objects.create(canonical_name="Node.js")
@@ -1343,18 +1348,64 @@ def test_profile_skills_resolve_catalog_aliases_and_preserve_entered_labels() ->
         reverse("skill_create"),
         skill_data(label="  Elixir  "),
     )
+    profile_response = client.get(reverse("profile"))
 
     assert first_response.url == reverse("profile")
     assert duplicate_response.status_code == 200
     assert b"already in your profile" in duplicate_response.content
     assert unknown_response.url == reverse("profile")
     assert list(
-        ProfileSkill.objects.filter(profile=profile).values_list("label", "concept__canonical_name")
-    ) == [("NodeJS", "Node.js"), ("Elixir", "Elixir")]
+        ProfileSkill.objects.filter(profile=profile).values_list(
+            "concept__canonical_name", flat=True
+        )
+    ) == ["Node.js", "Elixir"]
+    assert b">Node.js</span>" in profile_response.content
+    assert b">NodeJS</span>" not in profile_response.content
+    assert b">Elixir</span>" in profile_response.content
 
 
 @pytest.mark.django_db
-def test_skill_association_schema_has_label_constraints_without_normalized_columns() -> None:
+def test_canonical_concept_rename_propagates_without_mutating_associations() -> None:
+    account = verified_account("skill-rename-propagation@example.com")
+    profile = create_profile(account)
+    experience = Experience.objects.create(
+        profile=profile,
+        role="Engineer",
+        organization="Example",
+        start_date="2020-01-01",
+    )
+    project = Project.objects.create(profile=profile, name="Example project")
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    SkillAlias.objects.create(concept=concept, display_name="nodejs")
+    SkillAlias.objects.create(concept=concept, display_name="node")
+    client = Client()
+    client.force_login(account)
+    client.post(reverse("skill_create"), {"label": "Node.js"})
+    client.post(reverse("experience_skill_create", args=[experience.pk]), {"label": "NodeJS"})
+    client.post(reverse("project_skill_create", args=[project.pk]), {"label": "node"})
+
+    before = (
+        list(ProfileSkill.objects.values_list("pk", "position", "concept_id"))
+        + list(ExperienceSkill.objects.values_list("pk", "position", "concept_id"))
+        + list(ProjectSkill.objects.values_list("pk", "position", "concept_id"))
+    )
+    renamed = rename_skill_concept(concept=concept, canonical_name="NodeJS Runtime")
+
+    profile_response = client.get(reverse("profile"))
+    after = (
+        list(ProfileSkill.objects.values_list("pk", "position", "concept_id"))
+        + list(ExperienceSkill.objects.values_list("pk", "position", "concept_id"))
+        + list(ProjectSkill.objects.values_list("pk", "position", "concept_id"))
+    )
+
+    assert renamed.canonical_name == "NodeJS Runtime"
+    assert before == after
+    assert profile_response.content.count(b">NodeJS Runtime</span>") == 3
+    assert b">Node.js</span>" not in profile_response.content
+
+
+@pytest.mark.django_db
+def test_skill_association_schema_has_no_private_label_columns_or_constraints() -> None:
     account = verified_account("skill-schema@example.com")
     profile = create_profile(account)
     experience = Experience.objects.create(
@@ -1365,37 +1416,41 @@ def test_skill_association_schema_has_label_constraints_without_normalized_colum
     )
     project = Project.objects.create(profile=profile, name="Example project")
     concept, _ = resolve_skill_label("Python")
-    models_and_constraints = (
-        (ProfileSkill, profile, "profile_skill_label_not_blank"),
-        (ExperienceSkill, experience, "experience_skill_label_not_blank"),
-        (ProjectSkill, project, "project_skill_label_not_blank"),
+    models_and_owners = (
+        (ProfileSkill, profile),
+        (ExperienceSkill, experience),
+        (ProjectSkill, project),
     )
+    removed_constraint_names = {
+        "profile_skill_label_not_blank",
+        "experience_skill_label_not_blank",
+        "project_skill_label_not_blank",
+    }
 
     with connection.cursor() as cursor:
-        for model, _owner, constraint_name in models_and_constraints:
+        for model, _owner in models_and_owners:
             columns = {
                 column.name
                 for column in connection.introspection.get_table_description(
                     cursor, model._meta.db_table
                 )
             }
+            assert "label" not in columns
             assert "normalized_label" not in columns
-            assert constraint_name in {constraint.name for constraint in model._meta.constraints}
+            assert not removed_constraint_names & {
+                constraint.name for constraint in model._meta.constraints
+            }
 
-    with pytest.raises(IntegrityError):
-        model, owner, _ = models_and_constraints[0]
-        with transaction.atomic():
-            model.objects.bulk_create([model(profile=owner, concept=concept, label="", position=0)])
-    with pytest.raises(IntegrityError):
-        model, owner, _ = models_and_constraints[1]
-        with transaction.atomic():
-            model.objects.bulk_create(
-                [model(experience=owner, concept=concept, label="", position=0)]
-            )
-    with pytest.raises(IntegrityError):
-        model, owner, _ = models_and_constraints[2]
-        with transaction.atomic():
-            model.objects.bulk_create([model(project=owner, concept=concept, label="", position=0)])
+    for model, owner in models_and_owners:
+        field_names = {field.name for field in model._meta.fields}
+        assert "label" not in field_names
+        if model is ProfileSkill:
+            association = model.objects.create(profile=owner, concept=concept)
+        elif model is ExperienceSkill:
+            association = model.objects.create(experience=owner, concept=concept)
+        else:
+            association = model.objects.create(project=owner, concept=concept)
+        assert association.concept.canonical_name == "Python"
 
 
 @pytest.mark.django_db
@@ -1455,7 +1510,6 @@ def test_skill_and_language_operations_cannot_cross_account_boundaries() -> None
     skill = ProfileSkill.objects.create(
         profile=profile,
         concept=concept,
-        label="Python",
         position=0,
     )
     language = Language.objects.create(
@@ -1478,5 +1532,5 @@ def test_skill_and_language_operations_cannot_cross_account_boundaries() -> None
         response = getattr(client, method)(url, data)
         assert response.status_code == 404
 
-    assert ProfileSkill.objects.get(pk=skill.pk).label == "Python"
+    assert ProfileSkill.objects.get(pk=skill.pk).concept.canonical_name == "Python"
     assert Language.objects.get(pk=language.pk).name == "English"

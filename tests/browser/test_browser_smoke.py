@@ -794,7 +794,7 @@ def _resume_workbench_candidate(email: str) -> tuple[Account, JobApplication]:
         start_date="2020-01-01",
         description="Built internal systems.",
     )
-    ExperienceSkill.objects.create(experience=first, concept=concept, label="Python")
+    ExperienceSkill.objects.create(experience=first, concept=concept)
     Experience.objects.create(
         profile=profile,
         role="Intern",

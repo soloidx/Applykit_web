@@ -19,8 +19,8 @@ from apps.skills.services import resolve_skill_label
 @transaction.atomic
 def create_profile_skill(*, account: Account, label: str) -> ProfileSkill:
     profile = CandidateProfile.objects.select_for_update().get(account=account)
-    display_label = clean_skill_label(label)
-    concept, _ = resolve_skill_label(display_label)
+    normalized_label = clean_skill_label(label)
+    concept, _ = resolve_skill_label(normalized_label)
     if ProfileSkill.objects.filter(profile=profile, concept=concept).exists():
         raise ValidationError("This skill is already in your profile.")
     try:
@@ -28,7 +28,6 @@ def create_profile_skill(*, account: Account, label: str) -> ProfileSkill:
             skill = ProfileSkill.objects.create(
                 profile=profile,
                 concept=concept,
-                label=display_label,
                 position=profile.profile_skills.count(),
             )
             return skill
@@ -88,8 +87,8 @@ def create_experience_skill(*, account: Account, experience_id: int, label: str)
         pk=experience_id,
         profile__account=account,
     )
-    display_label = clean_skill_label(label)
-    concept, _ = resolve_skill_label(display_label)
+    normalized_label = clean_skill_label(label)
+    concept, _ = resolve_skill_label(normalized_label)
     if ExperienceSkill.objects.filter(experience=experience, concept=concept).exists():
         raise ValidationError("This skill is already used in this experience.")
     try:
@@ -97,7 +96,6 @@ def create_experience_skill(*, account: Account, experience_id: int, label: str)
             skill = ExperienceSkill.objects.create(
                 experience=experience,
                 concept=concept,
-                label=display_label,
                 position=experience.experience_skills.count(),
             )
             from apps.resumes.services import append_resume_skill
@@ -148,8 +146,8 @@ def create_project_skill(*, account: Account, project_id: int, label: str) -> Pr
         pk=project_id,
         profile__account=account,
     )
-    display_label = clean_skill_label(label)
-    concept, _ = resolve_skill_label(display_label)
+    normalized_label = clean_skill_label(label)
+    concept, _ = resolve_skill_label(normalized_label)
     if ProjectSkill.objects.filter(project=project, concept=concept).exists():
         raise ValidationError("This skill is already used in this project.")
     try:
@@ -157,7 +155,6 @@ def create_project_skill(*, account: Account, project_id: int, label: str) -> Pr
             skill = ProjectSkill.objects.create(
                 project=project,
                 concept=concept,
-                label=display_label,
                 position=project.project_skills.count(),
             )
             from apps.resumes.services import append_resume_skill

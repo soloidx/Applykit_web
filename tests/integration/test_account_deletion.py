@@ -69,7 +69,7 @@ def create_private_data(account: Account, company: Company) -> JobApplication:
     )
     Project.objects.create(profile=profile, name="Analytical engine simulator")
     concept, _ = resolve_skill_label("Python")
-    ProfileSkill.objects.create(profile=profile, concept=concept, label="Python")
+    ProfileSkill.objects.create(profile=profile, concept=concept)
     Language.objects.create(
         profile=profile,
         name="English",
@@ -136,7 +136,7 @@ def test_confirmed_account_deletion_removes_private_data_and_preserves_shared_da
     profile_id = CandidateProfile.objects.get(account=account).pk
     project = Project.objects.get(profile_id=profile_id)
     concept = SkillConcept.objects.create(canonical_name="Django")
-    ProjectSkill.objects.create(project=project, concept=concept, label="Django")
+    ProjectSkill.objects.create(project=project, concept=concept)
     retained_application = JobApplication.objects.create(
         account=other_account,
         campaign=Campaign.objects.get(account=other_account),

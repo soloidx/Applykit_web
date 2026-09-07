@@ -65,20 +65,20 @@
           <ul class="mt-4 flex flex-wrap gap-3">
             {% for experience_skill in experience.experience_skills.all %}
             <li class="flex items-center gap-2 rounded-full border border-ink/10 bg-cream px-4 py-2 text-sm font-semibold">
-              <span>{{ experience_skill.label }}</span>
+              <span>{{ experience_skill.concept.canonical_name }}</span>
               <form method="post" action="{% url 'experience_skill_delete' experience_skill.pk %}">
                 {% csrf_token %}
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ experience_skill.label }} from {{ experience.role }}">Remove</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ experience_skill.concept.canonical_name }} from {{ experience.role }}">Remove</button>
               </form>
               <form method="post" action="{% url 'experience_skill_reorder' experience_skill.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="direction" value="up">
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.label }} up">&uarr;</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.concept.canonical_name }} up">&uarr;</button>
               </form>
               <form method="post" action="{% url 'experience_skill_reorder' experience_skill.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="direction" value="down">
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.label }} down">&darr;</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ experience_skill.concept.canonical_name }} down">&darr;</button>
               </form>
             </li>
             {% endfor %}
@@ -222,20 +222,20 @@
           <ul class="mt-4 flex flex-wrap gap-3">
             {% for project_skill in project.project_skills.all %}
             <li class="flex items-center gap-2 rounded-full border border-ink/10 bg-cream px-4 py-2 text-sm font-semibold">
-              <span>{{ project_skill.label }}</span>
+              <span>{{ project_skill.concept.canonical_name }}</span>
               <form method="post" action="{% url 'project_skill_delete' project_skill.pk %}">
                 {% csrf_token %}
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ project_skill.label }} from {{ project.name }}">Remove</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ project_skill.concept.canonical_name }} from {{ project.name }}">Remove</button>
               </form>
               <form method="post" action="{% url 'project_skill_reorder' project_skill.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="direction" value="up">
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.label }} up">&uarr;</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.concept.canonical_name }} up">&uarr;</button>
               </form>
               <form method="post" action="{% url 'project_skill_reorder' project_skill.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="direction" value="down">
-                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.label }} down">&darr;</button>
+                <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ project_skill.concept.canonical_name }} down">&darr;</button>
               </form>
             </li>
             {% endfor %}
@@ -262,20 +262,20 @@
     <div class="mt-8 flex flex-wrap gap-3">
       {% for skill in skills %}
       <div class="flex items-center gap-2 rounded-full border border-ink/10 bg-sand/70 px-4 py-2 text-sm font-semibold">
-        <span>{{ skill.label }}</span>
+        <span>{{ skill.concept.canonical_name }}</span>
         <form method="post" action="{% url 'skill_delete' skill.pk %}">
           {% csrf_token %}
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ skill.label }}">Remove</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Remove {{ skill.concept.canonical_name }}">Remove</button>
         </form>
         <form method="post" action="{% url 'skill_reorder' skill.pk %}">
           {% csrf_token %}
           <input type="hidden" name="direction" value="up">
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.label }} up">&uarr;</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.concept.canonical_name }} up">&uarr;</button>
         </form>
         <form method="post" action="{% url 'skill_reorder' skill.pk %}">
           {% csrf_token %}
           <input type="hidden" name="direction" value="down">
-          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.label }} down">&darr;</button>
+          <button class="text-coral hover:text-ink" type="submit" aria-label="Move {{ skill.concept.canonical_name }} down">&darr;</button>
         </form>
       </div>
       {% empty %}

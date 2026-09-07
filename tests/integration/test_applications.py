@@ -1436,13 +1436,13 @@ def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence
         profile=profile,
         name="Deployment platform",
     )
-    ProfileSkill.objects.create(profile=profile, concept=node, label="NodeJS")
-    ProfileSkill.objects.create(profile=profile, concept=python, label="Python")
-    ExperienceSkill.objects.create(experience=experience, concept=node, label="Node.js")
-    ExperienceSkill.objects.create(experience=experience, concept=django, label="Django")
-    ExperienceSkill.objects.create(experience=experience, concept=go, label="Golang")
-    ProjectSkill.objects.create(project=project, concept=django, label="Django REST")
-    ProjectSkill.objects.create(project=project, concept=vue, label="Vue.js")
+    ProfileSkill.objects.create(profile=profile, concept=node)
+    ProfileSkill.objects.create(profile=profile, concept=python)
+    ExperienceSkill.objects.create(experience=experience, concept=node)
+    ExperienceSkill.objects.create(experience=experience, concept=django)
+    ExperienceSkill.objects.create(experience=experience, concept=go)
+    ProjectSkill.objects.create(project=project, concept=django)
+    ProjectSkill.objects.create(project=project, concept=vue)
     ApplicationSkillRequirement.objects.create(
         application=application,
         concept=node,
@@ -1500,13 +1500,13 @@ def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence
     assert b"Rust" in response.content
     assert b"Django" in response.content
     assert b"Elixir" in response.content
-    assert b"Profile skills: NodeJS" in response.content
+    assert b"Profile skills: Node.js" in response.content
     assert b"Profile skills: Python" in response.content
     assert b"Experience: Staff engineer at Example Labs: Node.js" in response.content
     assert b"Experience: Staff engineer at Example Labs: Django" in response.content
-    assert b"Experience: Staff engineer at Example Labs: Golang" in response.content
-    assert b"Project: Deployment platform: Django REST" in response.content
-    assert b"Project: Deployment platform: Vue.js" in response.content
+    assert b"Experience: Staff engineer at Example Labs: Go" in response.content
+    assert b"Project: Deployment platform: Django" in response.content
+    assert b"Project: Deployment platform: Vue" in response.content
     assert b"coverage score" not in response.content.lower()
 
 
@@ -1563,7 +1563,7 @@ def test_skill_coverage_is_isolated_from_other_accounts() -> None:
         role_title="Private platform engineer",
         job_description="Private job description.",
     )
-    ProfileSkill.objects.create(profile=owner.candidate_profile, concept=concept, label="Python")
+    ProfileSkill.objects.create(profile=owner.candidate_profile, concept=concept)
     ApplicationSkillRequirement.objects.create(
         application=application,
         concept=concept,

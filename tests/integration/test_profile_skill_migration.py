@@ -8,7 +8,8 @@ pytestmark = pytest.mark.integration
 @pytest.mark.django_db(transaction=True)
 def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_concepts() -> None:
     executor = MigrationExecutor(connection)
-    latest = [("profiles", "0013_candidateprofile_contact_email")]
+    legacy_head = [("profiles", "0013_candidateprofile_contact_email")]
+    current_head = [("profiles", "0014_remove_private_skill_labels")]
     executor.migrate([("profiles", "0006_projectskill")])
 
     old_apps = executor.loader.project_state([("profiles", "0006_projectskill")]).apps
@@ -54,15 +55,15 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
 
     try:
         executor = MigrationExecutor(connection)
-        executor.migrate(latest)
-        new_apps = executor.loader.project_state(latest).apps
-        ProfileSkill = new_apps.get_model("profiles", "ProfileSkill")
-        CandidateProfile = new_apps.get_model("profiles", "CandidateProfile")
-        SkillConcept = new_apps.get_model("skills", "SkillConcept")
-        SkillAlias = new_apps.get_model("skills", "SkillAlias")
-        Project = new_apps.get_model("profiles", "Project")
+        executor.migrate(legacy_head)
+        legacy_apps = executor.loader.project_state(legacy_head).apps
+        LegacyProfileSkill = legacy_apps.get_model("profiles", "ProfileSkill")
+        LegacyCandidateProfile = legacy_apps.get_model("profiles", "CandidateProfile")
+        SkillConcept = legacy_apps.get_model("skills", "SkillConcept")
+        SkillAlias = legacy_apps.get_model("skills", "SkillAlias")
+        LegacyProject = legacy_apps.get_model("profiles", "Project")
 
-        migrated = list(ProfileSkill.objects.order_by("profile_id", "position"))
+        migrated = list(LegacyProfileSkill.objects.order_by("profile_id", "position"))
         assert [(skill.label, skill.position) for skill in migrated] == [
             ("Python", 3),
             ("Ｐython", 4),
@@ -70,30 +71,32 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         ]
         assert {skill.profile_id for skill in migrated} == {first_profile.pk, second_profile.pk}
         assert (
-            CandidateProfile.objects.get(pk=first_profile.pk).contact_email == first_account.email
+            LegacyCandidateProfile.objects.get(pk=first_profile.pk).contact_email
+            == first_account.email
         )
         assert (
-            CandidateProfile.objects.get(pk=second_profile.pk).contact_email == second_account.email
+            LegacyCandidateProfile.objects.get(pk=second_profile.pk).contact_email
+            == second_account.email
         )
         assert all(skill.concept_id is not None for skill in migrated)
         python_concept_id = SkillConcept.objects.get(canonical_key="python").pk
         legacy_collision_concept_id = SkillConcept.objects.get(canonical_key="ｐython").pk
         assert (
-            ProfileSkill.objects.filter(
+            LegacyProfileSkill.objects.filter(
                 profile_id=first_profile.pk,
                 concept_id=python_concept_id,
             ).count()
             == 1
         )
         assert (
-            ProfileSkill.objects.filter(
+            LegacyProfileSkill.objects.filter(
                 profile_id=first_profile.pk,
                 concept_id=legacy_collision_concept_id,
             ).count()
             == 1
         )
         assert (
-            ProfileSkill.objects.filter(
+            LegacyProfileSkill.objects.filter(
                 profile_id=second_profile.pk,
                 concept_id=python_concept_id,
             ).count()
@@ -101,8 +104,22 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         )
         assert SkillConcept.objects.filter(canonical_key__in=["python", "ｐython"]).count() == 2
         assert SkillAlias.objects.filter(normalized_value__in=["python", "ｐython"]).count() == 2
-        assert Project.objects.filter(pk=legacy_project.pk).exists()
-        assert "technologies" not in {field.name for field in Project._meta.fields}
+        assert LegacyProject.objects.filter(pk=legacy_project.pk).exists()
+        assert "technologies" not in {field.name for field in LegacyProject._meta.fields}
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(current_head)
+        catalog_apps = executor.loader.project_state(current_head).apps
+        ProfileSkill = catalog_apps.get_model("profiles", "ProfileSkill")
+        CatalogConcept = catalog_apps.get_model("skills", "SkillConcept")
+        assert "label" not in {field.name for field in ProfileSkill._meta.fields}
+        rows = list(ProfileSkill.objects.order_by("profile_id", "position"))
+        assert [(row.position, row.concept_id) for row in rows] == [
+            (3, python_concept_id),
+            (4, legacy_collision_concept_id),
+            (1, python_concept_id),
+        ]
+        assert CatalogConcept.objects.filter(canonical_key__in=["python", "ｐython"]).count() == 2
     finally:
         executor = MigrationExecutor(connection)
-        executor.migrate(latest)
+        executor.migrate(current_head)
