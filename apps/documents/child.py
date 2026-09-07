@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from apps.documents.canonicalization import TextOverBudget
+from apps.documents.protocol import (
+    INTERNAL_ERROR,
+    OVER_BUDGET,
+    UNSUPPORTED_FORMAT,
+    max_result_bytes,
+)
 from apps.documents.reader import DocumentParseError, read_docx_text
 
 
@@ -27,10 +33,12 @@ def main() -> None:
     job = _read_job()
     envelope: dict[str, object]
     if job is None:
-        envelope = {"ok": False, "category": "internal_error"}
+        envelope = {"ok": False, "category": INTERNAL_ERROR}
+        max_code_points = None
     else:
         envelope = _process(job)
-    _emit(envelope)
+        max_code_points = job.max_code_points
+    _emit(envelope, max_code_points)
 
 
 def _read_job() -> _Job | None:
@@ -52,40 +60,32 @@ def _read_job() -> _Job | None:
 
 def _process(job: _Job) -> dict[str, object]:
     if job.format != "docx":
-        return {"ok": False, "category": "unsupported_format"}
+        return {"ok": False, "category": UNSUPPORTED_FORMAT}
     try:
         text = read_docx_text(Path(job.path), max_code_points=job.max_code_points)
     except DocumentParseError as error:
         return {"ok": False, "category": error.category}
     except TextOverBudget:
-        return {"ok": False, "category": "over_budget"}
+        return {"ok": False, "category": OVER_BUDGET}
     except MemoryError:
-        return {"ok": False, "category": "over_budget"}
+        return {"ok": False, "category": OVER_BUDGET}
     except Exception:  # noqa: BLE001 - the child must never leak a traceback
-        return {"ok": False, "category": "internal_error"}
+        return {"ok": False, "category": INTERNAL_ERROR}
     return {"ok": True, "text": text, "code_points": len(text)}
 
 
-def _emit(envelope: dict[str, object]) -> None:
+def _emit(envelope: dict[str, object], max_code_points: int | None) -> None:
     output = sys.stdout.buffer
     try:
         payload = json.dumps(envelope, ensure_ascii=False).encode()
         # Keep the answer within the parent's bounded pipe window.
-        if len(payload) > _max_payload_bytes(envelope):
-            payload = json.dumps({"ok": False, "category": "over_budget"}).encode()
+        if max_code_points is not None and len(payload) > max_result_bytes(max_code_points):
+            payload = json.dumps({"ok": False, "category": OVER_BUDGET}).encode()
         output.write(struct.pack(">Q", len(payload)))
         output.write(payload)
         output.flush()
     except OSError, ValueError, MemoryError:
         raise SystemExit(1) from None
-
-
-def _max_payload_bytes(envelope: dict[str, object]) -> int:
-    text = envelope.get("text")
-    if envelope.get("ok") is True and isinstance(text, str):
-        # UTF-8 needs at most 4 bytes per code point.
-        return len(text) * 4 + 65536
-    return 65536
 
 
 if __name__ == "__main__":

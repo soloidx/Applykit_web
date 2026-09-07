@@ -110,7 +110,7 @@ def test_telemetry_never_contains_source_content(make_docx, tmp_path, caplog):
         assert not any("SecretMarkerBodyText" in str(value) for value in record.__dict__.values())
 
 
-def test_temp_root_is_the_only_written_location(make_docx, tmp_path, monkeypatch):
+def test_writes_nothing_outside_the_private_temp_root(make_docx, tmp_path, monkeypatch):
     watched = tmp_path / "watched"
     watched.mkdir()
     source = make_docx(paragraphs=["Hello."])

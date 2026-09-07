@@ -14,10 +14,9 @@ import mammoth
 from docx import Document
 
 from apps.documents.canonicalization import canonicalize
+from apps.documents.protocol import MALFORMED_DOCUMENT
 
 __all__ = ["DocumentParseError", "read_docx_text"]
-
-_CATEGORY_MALFORMED = "malformed_document"
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _BLOCK_TAGS = _HEADING_TAGS | {"p", "li", "tr"}
@@ -92,7 +91,7 @@ def _read_body(path: Path) -> list[str]:
                 convert_image=mammoth.images.img_element(lambda image: {"src": ""}),
             )
     except (zipfile.BadZipFile, OSError, ValueError, KeyError) as error:
-        raise DocumentParseError(_CATEGORY_MALFORMED) from error
+        raise DocumentParseError(MALFORMED_DOCUMENT) from error
     parser.feed(result.value)
     return parser.blocks
 
@@ -101,7 +100,7 @@ def _read_headers_and_footers(path: Path) -> list[str]:
     try:
         document = Document(str(path))
     except (zipfile.BadZipFile, OSError, ValueError, KeyError) as error:
-        raise DocumentParseError(_CATEGORY_MALFORMED) from error
+        raise DocumentParseError(MALFORMED_DOCUMENT) from error
 
     lines: list[str] = []
     for section in document.sections:

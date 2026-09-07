@@ -14,15 +14,15 @@ from typing import BinaryIO
 
 from apps.documents import conf, storage, telemetry
 from apps.documents.intake import DocumentLimits, PackageRejected, preflight_docx
+from apps.documents.protocol import (
+    EXTRACTION_UNAVAILABLE,
+    INTERNAL_ERROR,
+    OVER_BUDGET,
+    max_result_bytes,
+)
 from apps.documents.runner import ProcessLimits, run_isolated
 
 __all__ = ["DocumentExtractionError", "ExtractedDocument", "extract_docx"]
-
-_RESULT_SLACK_BYTES = 65536
-
-_INTERNAL_ERROR = "internal_error"
-_OVER_BUDGET = "over_budget"
-_UNAVAILABLE = "extraction_unavailable"
 
 
 @dataclass(frozen=True)
@@ -53,10 +53,10 @@ def extract_docx(
             "document_extraction.rejected",
             correlation_id=correlation_id,
             source_format="docx",
-            outcome=_UNAVAILABLE,
+            outcome=EXTRACTION_UNAVAILABLE,
             isolation="unavailable",
         )
-        raise DocumentExtractionError(_UNAVAILABLE)
+        raise DocumentExtractionError(EXTRACTION_UNAVAILABLE)
 
     isolation = "linux" if _is_linux() else "reduced"
     telemetry.log_event(
@@ -68,14 +68,28 @@ def extract_docx(
     )
     try:
         result = _extract(source, cfg, correlation_id)
-    finally:
-        telemetry.log_event(
-            "document_extraction.completed",
-            correlation_id=correlation_id,
-            source_format="docx",
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+    except DocumentExtractionError as failure:
+        _log_completed(correlation_id, outcome=failure.category, code_points=None, started=started)
+        raise
+    _log_completed(
+        correlation_id, outcome="success", code_points=result.code_points, started=started
+    )
     return result
+
+
+def _log_completed(
+    correlation_id: str, *, outcome: str, code_points: int | None, started: float
+) -> None:
+    # Content-free fields only: typed outcome and bounded counts.
+    telemetry.log_event(
+        "document_extraction.completed",
+        correlation_id=correlation_id,
+        source_format="docx",
+        outcome=outcome,
+        code_points=code_points,
+        extractor_version=telemetry.EXTRACTOR_VERSION,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 def _extract(
@@ -102,8 +116,7 @@ def _extract(
             cpu_seconds=cfg.cpu_seconds,
             wall_seconds=cfg.wall_seconds,
             memory_bytes=cfg.memory_bytes,
-            # UTF-8 needs at most 4 bytes per code point, plus envelope slack.
-            max_result_bytes=cfg.max_code_points * 4 + _RESULT_SLACK_BYTES,
+            max_result_bytes=max_result_bytes(cfg.max_code_points),
         )
         job: dict[str, str | int] = {
             "path": str(source_path),
@@ -115,7 +128,7 @@ def _extract(
         _clean_up(private_dir, correlation_id)
 
     if not outcome.ok or outcome.text is None:
-        raise DocumentExtractionError(outcome.category or _INTERNAL_ERROR)
+        raise DocumentExtractionError(outcome.category or INTERNAL_ERROR)
     return ExtractedDocument(text=outcome.text, code_points=outcome.code_points or 0)
 
 
@@ -125,7 +138,7 @@ def _spool_source(source: BinaryIO, path: Path, max_bytes: int) -> None:
         while chunk := source.read(65536):
             written += len(chunk)
             if written > max_bytes:
-                raise DocumentExtractionError(_OVER_BUDGET)
+                raise DocumentExtractionError(OVER_BUDGET)
             target.write(chunk)
 
 
@@ -139,7 +152,7 @@ def _clean_up(private_dir: Path, correlation_id: str) -> None:
             source_format="docx",
         )
         telemetry.mark_instance_unhealthy("cleanup_failed")
-        raise DocumentExtractionError(_INTERNAL_ERROR) from None
+        raise DocumentExtractionError(INTERNAL_ERROR) from None
 
 
 def _is_linux() -> bool:

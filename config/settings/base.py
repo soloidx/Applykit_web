@@ -112,7 +112,8 @@ LOGOUT_REDIRECT_URL = "/"
 
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
 
-# Document extraction boundary limits. Callers cannot override these values.
+# Document extraction boundary limits. Only operators configure these
+# values through settings; callers and candidates cannot override them.
 DOCUMENT_EXTRACTION = {
     "MAX_UPLOAD_BYTES": 10 * 1024 * 1024,
     "MAX_MEMBERS": 2000,

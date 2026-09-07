@@ -57,10 +57,10 @@ requires-dist = [
     { name = "django-anymail", extras = ["resend"], specifier = ">=13.1,<14.0" },
     { name = "django-environ", specifier = ">=0.12,<1.0" },
     { name = "gunicorn", specifier = ">=23.0,<24.0" },
-    { name = "mammoth", specifier = ">=1.12.1" },
+    { name = "mammoth", specifier = ">=1.12.1,<2.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4.0" },
     { name = "publicsuffix2", specifier = ">=2.20191221" },
-    { name = "python-docx", specifier = ">=1.2.0" },
+    { name = "python-docx", specifier = ">=1.2.0,<2.0" },
     { name = "whitenoise", specifier = ">=6.9,<7.0" },
 ]
 

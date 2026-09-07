@@ -10,11 +10,9 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["DocumentLimits", "PackageRejected", "preflight_docx"]
+from apps.documents.protocol import MALFORMED_DOCUMENT, OVER_BUDGET, UNSUPPORTED_FORMAT
 
-_CATEGORY_UNSUPPORTED = "unsupported_format"
-_CATEGORY_MALFORMED = "malformed_document"
-_CATEGORY_OVER_BUDGET = "over_budget"
+__all__ = ["DocumentLimits", "PackageRejected", "preflight_docx"]
 
 _OLE_MAGIC = b"\xd0\xcf\x11\xe0"
 _ENCRYPTED_MEMBERS = frozenset({"encryptioninfo", "encryptedpackage"})
@@ -47,19 +45,19 @@ class PackageRejected(Exception):
 
 def preflight_docx(path: Path, limits: DocumentLimits) -> None:
     if path.stat().st_size > limits.max_bytes:
-        raise PackageRejected(_CATEGORY_OVER_BUDGET)
+        raise PackageRejected(OVER_BUDGET)
 
     with path.open("rb") as source:
         magic = source.read(8)
     if magic.startswith(_OLE_MAGIC):
         # An OLE compound container is either a legacy binary document or an
         # encrypted OOXML package. Both are unsupported without inspection.
-        raise PackageRejected(_CATEGORY_UNSUPPORTED)
+        raise PackageRejected(UNSUPPORTED_FORMAT)
 
     try:
         archive = zipfile.ZipFile(path)
     except zipfile.BadZipFile:
-        raise PackageRejected(_CATEGORY_MALFORMED) from None
+        raise PackageRejected(MALFORMED_DOCUMENT) from None
 
     with archive:
         _preflight_members(archive, limits)
@@ -69,46 +67,46 @@ def preflight_docx(path: Path, limits: DocumentLimits) -> None:
 def _preflight_members(archive: zipfile.ZipFile, limits: DocumentLimits) -> None:
     members = archive.infolist()
     if len(members) > limits.max_members:
-        raise PackageRejected(_CATEGORY_OVER_BUDGET)
+        raise PackageRejected(OVER_BUDGET)
 
     expanded = 0
     for member in members:
         name = member.filename
         normalised = name.replace("\\", "/")
         if normalised.startswith("/") or normalised.startswith("~"):
-            raise PackageRejected(_CATEGORY_MALFORMED)
+            raise PackageRejected(MALFORMED_DOCUMENT)
         parts = normalised.split("/")
         if ".." in parts or "" in parts[:-1]:
-            raise PackageRejected(_CATEGORY_MALFORMED)
+            raise PackageRejected(MALFORMED_DOCUMENT)
         if name.lower() in _ENCRYPTED_MEMBERS:
-            raise PackageRejected(_CATEGORY_UNSUPPORTED)
+            raise PackageRejected(UNSUPPORTED_FORMAT)
         expanded += member.file_size
         if member.file_size > limits.max_member_bytes:
-            raise PackageRejected(_CATEGORY_OVER_BUDGET)
+            raise PackageRejected(OVER_BUDGET)
     if expanded > limits.max_expanded_bytes:
-        raise PackageRejected(_CATEGORY_OVER_BUDGET)
+        raise PackageRejected(OVER_BUDGET)
 
 
 def _preflight_content_type(archive: zipfile.ZipFile) -> None:
     if _DOCUMENT_PART not in archive.namelist():
-        raise PackageRejected(_CATEGORY_MALFORMED)
+        raise PackageRejected(MALFORMED_DOCUMENT)
     try:
         content_types = archive.read(_CONTENT_TYPES_PART)
     except zipfile.BadZipFile, OSError:
-        raise PackageRejected(_CATEGORY_MALFORMED) from None
+        raise PackageRejected(MALFORMED_DOCUMENT) from None
 
     declared = _declared_content_type(content_types)
     if declared is None:
-        raise PackageRejected(_CATEGORY_MALFORMED)
+        raise PackageRejected(MALFORMED_DOCUMENT)
     if declared != _WORDPROCESSING_MAIN:
-        raise PackageRejected(_CATEGORY_UNSUPPORTED)
+        raise PackageRejected(UNSUPPORTED_FORMAT)
 
 
 def _declared_content_type(content_types: bytes) -> str | None:
     try:
         root = ET.fromstring(content_types)
     except ET.ParseError:
-        raise PackageRejected(_CATEGORY_MALFORMED) from None
+        raise PackageRejected(MALFORMED_DOCUMENT) from None
 
     override_tag = f"{{{_CONTENT_TYPES_NAMESPACE}}}Override"
     default_tag = f"{{{_CONTENT_TYPES_NAMESPACE}}}Default"

@@ -103,6 +103,14 @@ A field reset removes only that override. An item reset clears its overrides and
 
 Removing a source-backed item from a Resume deletes its descendant overlay state. Deleting a Candidate Profile source deletes overlay state keyed to it; deleting the final Candidate Skill Association for an aggregated Resume Skill deletes that item and its override. A Resume cannot be independently deleted; deleting its owning Job Application or Account deletes it.
 
+### Document Extraction Boundary
+
+The isolated component that turns one supported source upload into bounded canonical text. It validates the package structurally, spools the source into generated private per-request non-persistent storage, and extracts in a fresh resource-limited child process with a bounded result pipe.
+
+Canonical text is normalized to NFC, has unsafe control characters removed, preserves meaningful headings and paragraphs, and is bounded by a hard code-point limit. Over-budget, malformed, unsupported, or hostile sources fail with a fixed content-safe category; they are never repaired or truncated.
+
+Do not call the extraction result parsed HTML or a document draft. It is untrusted delimited prompt input for a later AI operation.
+
 ### Cover Letter
 
 An optional application-owned, private one-to-one document containing narrow server-sanitized HTML. Optional means its Job Application may remain in the Not created state at every Application Stage: reading the workbench, opening a blank editor, or loading the local starter template does not create it.
@@ -165,6 +173,7 @@ The active Django app boundaries are:
 - `applications`: Company, Job Application, Stage Transition, and Recruitment Event
 - `resumes`: application-owned Resume live overlays and deterministic initialization
 - `cover_letters`: optional application-owned Cover Letter content
+- `documents`: the Document Extraction Boundary that converts one supported upload into bounded canonical text in an isolated child process
 
 Preview, PDF/DOCX export, rendered files, print layout, AI, semantic matching, asynchronous infrastructure, named document variants, version history, collaboration, immutable submission snapshots, and requiring a Resume for `Submitted` are outside the current document app boundaries. AI-assisted research and suggestions need a separate decision about provider boundaries, consent, retention, and handling of candidate data before implementation.
 
