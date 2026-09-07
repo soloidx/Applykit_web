@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from time import sleep
+from typing import TypeVar
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, OperationalError, connection, transaction
@@ -13,6 +15,8 @@ from apps.skills.models import (
     normalize_skill_label,
 )
 
+T = TypeVar("T")
+
 
 def _resolved_skill_label(normalized_value: str) -> SkillAlias | None:
     return (
@@ -24,6 +28,10 @@ def _resolved_skill_label(normalized_value: str) -> SkillAlias | None:
 
 def _resolved_skill_concept(normalized_value: str) -> SkillConcept | None:
     return SkillConcept.objects.filter(canonical_key=normalized_value).first()
+
+
+def _canonical_skill_alias(concept: SkillConcept) -> SkillAlias:
+    return SkillAlias.objects.get(concept=concept, is_canonical=True)
 
 
 @transaction.atomic
@@ -39,21 +47,33 @@ def _resolve_skill_label(display_name: str, normalized_value: str) -> tuple[Skil
     return SkillConcept.objects.create(canonical_name=display_name), True
 
 
-def resolve_skill_label(label: str) -> tuple[SkillConcept, bool]:
-    """Resolve an exact public skill label or create its shared concept."""
-    display_name = clean_skill_label(label)
-    normalized_value = normalize_skill_label(display_name)
+@transaction.atomic
+def _resolve_skill_alias(display_name: str, normalized_value: str) -> tuple[SkillAlias, bool]:
+    match = _resolved_skill_label(normalized_value)
+    if match:
+        return match, False
+
+    canonical_match = _resolved_skill_concept(normalized_value)
+    if canonical_match:
+        return _canonical_skill_alias(canonical_match), False
+
+    concept = SkillConcept.objects.create(canonical_name=display_name)
+    return _canonical_skill_alias(concept), True
+
+
+def _retry_skill_resolution[T](
+    operation: Callable[[], T],
+    recovered: Callable[[], T | None],
+) -> T:
+    """Run a namespace-mutating resolution, retrying a lost namespace race."""
     for attempt in range(5):
         try:
-            return _resolve_skill_label(display_name, normalized_value)
+            return operation()
         except IntegrityError:
             # A competing transaction has committed the winning namespace row.
-            match = _resolved_skill_label(normalized_value)
-            if match:
-                return match.concept, False
-            canonical_match = _resolved_skill_concept(normalized_value)
-            if canonical_match:
-                return canonical_match, False
+            recovered_result = recovered()
+            if recovered_result is not None:
+                return recovered_result
             raise
         except OperationalError as error:
             if connection.vendor != "sqlite" or "locked" not in str(error).lower():
@@ -62,7 +82,47 @@ def resolve_skill_label(label: str) -> tuple[SkillConcept, bool]:
                 raise
             sleep(0.05 * (2**attempt))
 
-    raise RuntimeError("Skill label resolution did not complete.")
+    raise RuntimeError("Skill wording resolution did not complete.")
+
+
+def resolve_skill_label(label: str) -> tuple[SkillConcept, bool]:
+    """Resolve an exact public skill label or create its shared concept."""
+    display_name = clean_skill_label(label)
+    normalized_value = normalize_skill_label(display_name)
+
+    def recovered() -> tuple[SkillConcept, bool] | None:
+        match = _resolved_skill_label(normalized_value)
+        if match:
+            return match.concept, False
+        canonical_match = _resolved_skill_concept(normalized_value)
+        if canonical_match:
+            return canonical_match, False
+        return None
+
+    return _retry_skill_resolution(
+        lambda: _resolve_skill_label(display_name, normalized_value),
+        recovered,
+    )
+
+
+def resolve_skill_alias(label: str) -> tuple[SkillAlias, bool]:
+    """Resolve public wording to its shared alias, creating the shared concept when unknown."""
+    display_name = clean_skill_label(label)
+    normalized_value = normalize_skill_label(display_name)
+
+    def recovered() -> tuple[SkillAlias, bool] | None:
+        match = _resolved_skill_label(normalized_value)
+        if match:
+            return match, False
+        canonical_match = _resolved_skill_concept(normalized_value)
+        if canonical_match:
+            return _canonical_skill_alias(canonical_match), False
+        return None
+
+    return _retry_skill_resolution(
+        lambda: _resolve_skill_alias(display_name, normalized_value),
+        recovered,
+    )
 
 
 @transaction.atomic

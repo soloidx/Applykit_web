@@ -22,7 +22,7 @@ from apps.applications.models import (
 )
 from apps.profiles.models import CandidateProfile
 from apps.skills.models import SkillAlias, SkillConcept, clean_skill_label
-from apps.skills.services import resolve_skill_label
+from apps.skills.services import resolve_skill_alias
 
 
 @dataclass(frozen=True)
@@ -90,8 +90,8 @@ def calculate_skill_coverage(
         "matched_preferred": [],
         "missing_preferred": [],
     }
-    for requirement in application.skill_requirements.select_related("concept").all():
-        evidence = tuple(evidence_by_concept.get(requirement.concept_id, []))
+    for requirement in application.skill_requirements.select_related("alias").all():
+        evidence = tuple(evidence_by_concept.get(requirement.alias.concept_id, []))
         status = "matched" if evidence else "missing"
         classification = "required" if requirement.classification == "required" else "preferred"
         coverage[f"{status}_{classification}"].append(
@@ -237,15 +237,14 @@ def create_application_skill_requirement(
     )
     display_label = _requirement_label(label)
     selected_classification = _requirement_classification(classification)
-    concept, _ = resolve_skill_label(display_label)
+    alias, _ = resolve_skill_alias(display_label)
     if ApplicationSkillRequirement.objects.filter(
-        application=application, concept=concept
+        application=application, alias__concept_id=alias.concept_id
     ).exists():
         raise ValidationError("This application already has this skill requirement.")
     requirement = ApplicationSkillRequirement(
         application=application,
-        concept=concept,
-        label=display_label,
+        alias=alias,
         classification=selected_classification,
     )
     requirement.full_clean()
@@ -275,16 +274,22 @@ def _normalized_text_with_source_spans(value: str) -> tuple[str, list[tuple[int,
     return normalized_value, source_spans
 
 
-def _catalog_skill_matches(job_description: str) -> list[tuple[SkillConcept, str]]:
+def _catalog_skill_matches(job_description: str) -> list[SkillAlias]:
     normalized_description, source_spans = _normalized_text_with_source_spans(job_description)
-    catalog: dict[str, tuple[SkillConcept, int]] = {}
-    for alias in SkillAlias.objects.select_related("concept").all():
-        catalog.setdefault(alias.normalized_value, (alias.concept, alias.pk))
+    catalog: dict[str, tuple[SkillAlias, int]] = {}
+    aliases = list(SkillAlias.objects.select_related("concept").all())
+    canonical_alias_by_concept = {
+        alias.concept_id: alias for alias in aliases if alias.is_canonical
+    }
+    for alias in aliases:
+        catalog.setdefault(alias.normalized_value, (alias, alias.pk))
     for concept in SkillConcept.objects.all():
-        catalog.setdefault(concept.canonical_key, (concept, concept.pk))
+        canonical_alias = canonical_alias_by_concept.get(concept.pk)
+        if canonical_alias is not None:
+            catalog.setdefault(concept.canonical_key, (canonical_alias, -concept.pk))
 
-    candidates: list[tuple[int, int, int, SkillConcept, str]] = []
-    for normalized_label, (concept, catalog_id) in catalog.items():
+    candidates: list[tuple[int, int, int, int, SkillAlias]] = []
+    for normalized_label, (alias, catalog_id) in catalog.items():
         if not normalized_label:
             continue
         pattern = re.compile(
@@ -295,28 +300,21 @@ def _catalog_skill_matches(job_description: str) -> list[tuple[SkillConcept, str
             source_start = source_spans[match.start()][0]
             source_end = source_spans[match.end() - 1][1]
             candidates.append(
-                (
-                    source_start,
-                    -(match.end() - match.start()),
-                    catalog_id,
-                    concept,
-                    job_description[source_start:source_end],
-                )
+                (source_start, -(match.end() - match.start()), catalog_id, source_end, alias)
             )
 
-    matches: list[tuple[SkillConcept, str]] = []
+    matches: list[SkillAlias] = []
     matched_concepts: set[int] = set()
     occupied_spans: list[tuple[int, int]] = []
-    for source_start, _negative_length, _catalog_id, concept, source_label in sorted(candidates):
-        source_end = source_start + len(source_label)
-        if concept.pk in matched_concepts or any(
+    for source_start, _negative_length, _catalog_id, source_end, alias in sorted(candidates):
+        if alias.concept_id in matched_concepts or any(
             source_start < occupied_end and source_end > occupied_start
             for occupied_start, occupied_end in occupied_spans
         ):
             continue
-        matched_concepts.add(concept.pk)
+        matched_concepts.add(alias.concept_id)
         occupied_spans.append((source_start, source_end))
-        matches.append((concept, source_label))
+        matches.append(alias)
     return matches
 
 
@@ -328,22 +326,37 @@ def extract_application_skill_requirements(
         pk=application_id,
         account=account,
     )
-    existing_concepts = set(application.skill_requirements.values_list("concept_id", flat=True))
+    existing_concepts = set(
+        application.skill_requirements.values_list("alias__concept_id", flat=True)
+    )
     extracted: list[ApplicationSkillRequirement] = []
-    for concept, source_label in _catalog_skill_matches(application.job_description):
-        if concept.pk in existing_concepts:
+    for alias in _catalog_skill_matches(application.job_description):
+        if alias.concept_id in existing_concepts:
             continue
         requirement = ApplicationSkillRequirement(
             application=application,
-            concept=concept,
-            label=source_label,
+            alias=alias,
             classification=ApplicationSkillRequirement.Classification.PREFERRED,
         )
         requirement.full_clean()
         requirement.save()
-        existing_concepts.add(concept.pk)
+        existing_concepts.add(alias.concept_id)
         extracted.append(requirement)
     return tuple(extracted)
+
+
+def _locked_requirement(
+    *, account: Account, application_id: int, requirement_id: int
+) -> tuple[JobApplication, ApplicationSkillRequirement]:
+    application = JobApplication.objects.select_for_update().get(
+        pk=application_id,
+        account=account,
+    )
+    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
+        pk=requirement_id,
+        application=application,
+    )
+    return application, requirement
 
 
 @transaction.atomic
@@ -352,19 +365,32 @@ def update_application_skill_requirement(
     account: Account,
     application_id: int,
     requirement_id: int,
-    label: str,
     classification: str,
 ) -> ApplicationSkillRequirement:
-    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
-        pk=requirement_id,
+    _application, requirement = _locked_requirement(
+        account=account,
         application_id=application_id,
-        application__account=account,
+        requirement_id=requirement_id,
     )
-    requirement.label = _requirement_label(label)
     requirement.classification = _requirement_classification(classification)
     requirement.full_clean()
-    requirement.save(update_fields=["label", "classification"])
+    requirement.save(update_fields=["classification"])
     return requirement
+
+
+def _collapse_requirement_into_destination(
+    *,
+    destination: ApplicationSkillRequirement,
+    duplicate: ApplicationSkillRequirement,
+) -> ApplicationSkillRequirement:
+    if (
+        destination.classification != ApplicationSkillRequirement.Classification.REQUIRED
+        and duplicate.classification == ApplicationSkillRequirement.Classification.REQUIRED
+    ):
+        destination.classification = ApplicationSkillRequirement.Classification.REQUIRED
+        destination.save(update_fields=["classification"])
+    duplicate.delete()
+    return destination
 
 
 @transaction.atomic
@@ -374,25 +400,29 @@ def remap_application_skill_requirement(
     application_id: int,
     requirement_id: int,
     label: str,
-) -> ApplicationSkillRequirement:
-    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
-        pk=requirement_id,
+) -> tuple[ApplicationSkillRequirement, bool]:
+    application, requirement = _locked_requirement(
+        account=account,
         application_id=application_id,
-        application__account=account,
+        requirement_id=requirement_id,
     )
     display_label = _requirement_label(label)
-    concept, _ = resolve_skill_label(display_label)
-    if (
-        ApplicationSkillRequirement.objects.filter(application_id=application_id, concept=concept)
+    alias, _ = resolve_skill_alias(display_label)
+    if alias.pk == requirement.alias_id:
+        return requirement, False
+    destination = (
+        ApplicationSkillRequirement.objects.select_for_update()
+        .filter(application=application, alias__concept_id=alias.concept_id)
         .exclude(pk=requirement.pk)
-        .exists()
-    ):
-        raise ValidationError("This application already has this skill requirement.")
-    requirement.concept = concept
-    requirement.label = display_label
-    requirement.full_clean()
-    requirement.save(update_fields=["concept", "label"])
-    return requirement
+        .first()
+    )
+    if destination is not None:
+        return _collapse_requirement_into_destination(
+            destination=destination, duplicate=requirement
+        ), True
+    requirement.alias = alias
+    requirement.save(update_fields=["alias"])
+    return requirement, False
 
 
 @transaction.atomic
@@ -402,10 +432,10 @@ def delete_application_skill_requirement(
     application_id: int,
     requirement_id: int,
 ) -> None:
-    requirement = ApplicationSkillRequirement.objects.select_for_update().get(
-        pk=requirement_id,
+    _application, requirement = _locked_requirement(
+        account=account,
         application_id=application_id,
-        application__account=account,
+        requirement_id=requirement_id,
     )
     requirement.delete()
 

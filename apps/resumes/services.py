@@ -100,14 +100,14 @@ def _skill_initialization_order(
         index += 1
 
     classifications: dict[int, int] = {}
-    for requirement in application.skill_requirements.all():
+    for requirement in application.skill_requirements.select_related("alias").all():
         rank = (
             0
             if requirement.classification == ApplicationSkillRequirement.Classification.REQUIRED
             else 1
         )
-        classifications[requirement.concept_id] = min(
-            classifications.get(requirement.concept_id, 2), rank
+        classifications[requirement.alias.concept_id] = min(
+            classifications.get(requirement.alias.concept_id, 2), rank
         )
 
     return sorted(
@@ -146,7 +146,7 @@ def _relevant_source_ids(
     application: JobApplication,
     profile: CandidateProfile,
 ) -> tuple[set[int], set[int]]:
-    requirements = set(application.skill_requirements.values_list("concept_id", flat=True))
+    requirements = set(application.skill_requirements.values_list("alias__concept_id", flat=True))
     relevant_experience_ids = set(
         ExperienceSkill.objects.filter(
             experience__profile=profile,

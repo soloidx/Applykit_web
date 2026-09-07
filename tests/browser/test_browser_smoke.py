@@ -23,7 +23,7 @@ from apps.profiles.models import (
     Language,
     Project,
 )
-from apps.skills.models import SkillConcept
+from apps.skills.models import SkillAlias, SkillConcept
 
 # pytest-playwright starts its sync API from an async-managed fixture context.
 os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
@@ -816,8 +816,7 @@ def _resume_workbench_candidate(email: str) -> tuple[Account, JobApplication]:
     )
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=SkillAlias.objects.get(concept=concept, is_canonical=True),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     return account, application

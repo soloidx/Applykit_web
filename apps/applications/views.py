@@ -303,11 +303,10 @@ def application_skill_requirement_edit(
                 account=account,
                 application_id=application.pk,
                 requirement_id=requirement.pk,
-                label=str(form.cleaned_data["label"]),
                 classification=str(form.cleaned_data["classification"]),
             )
         except ValidationError as error:
-            form.add_error("label", error)
+            form.add_error("classification", error)
         else:
             return _redirect_or_htmx_redirect(
                 request,
@@ -345,7 +344,7 @@ def application_skill_requirement_remap(
     form = ApplicationSkillRequirementRemapForm(request.POST)
     if form.is_valid():
         try:
-            remap_application_skill_requirement(
+            _remapped, collapsed = remap_application_skill_requirement(
                 account=account,
                 application_id=application.pk,
                 requirement_id=requirement.pk,
@@ -354,6 +353,12 @@ def application_skill_requirement_remap(
         except ValidationError as error:
             form.add_error("label", error)
         else:
+            if collapsed:
+                messages.info(
+                    request,
+                    "That wording matches an existing skill requirement; the two requirements "
+                    "were merged and Required won where either was required.",
+                )
             return _redirect_or_htmx_redirect(
                 request,
                 reverse("application_detail", args=[application.pk]),
@@ -457,7 +462,7 @@ def _application_detail_context(
                 timezone_name=timezone_name,
                 instance=event,
             )
-    requirements = list(application.skill_requirements.select_related("concept").all())
+    requirements = list(application.skill_requirements.select_related("alias__concept").all())
     skill_coverage = calculate_skill_coverage(
         account=account,
         application=application,
@@ -468,16 +473,13 @@ def _application_detail_context(
             requirement.edit_form = requirement_edit_form
         else:
             requirement.edit_form = ApplicationSkillRequirementEditForm(
-                initial={
-                    "label": requirement.label,
-                    "classification": requirement.classification,
-                }
+                initial={"classification": requirement.classification}
             )
         if requirement_remap_form is not None and requirement.pk == requirement_remap_id:
             requirement.remap_form = requirement_remap_form
         else:
             requirement.remap_form = ApplicationSkillRequirementRemapForm(
-                initial={"label": requirement.label}
+                initial={"label": requirement.alias.display_name}
             )
     return {
         "application": application,

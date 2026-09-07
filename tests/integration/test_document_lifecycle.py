@@ -33,7 +33,7 @@ from apps.resumes.models import (
     ResumeSkill,
 )
 from apps.resumes.services import open_resume
-from apps.skills.models import SkillConcept
+from apps.skills.models import SkillAlias, SkillConcept
 
 pytestmark = pytest.mark.integration
 
@@ -272,8 +272,7 @@ def test_confirmed_account_deletion_removes_documents_and_preserves_shared_catal
     )
     ApplicationSkillRequirement.objects.create(
         application=retained,
-        concept=concept,
-        label="Python",
+        alias=SkillAlias.objects.get(concept=concept, is_canonical=True),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     resume, _created = open_resume(account=account, application_id=application.pk)
@@ -309,7 +308,7 @@ def test_confirmed_account_deletion_removes_documents_and_preserves_shared_catal
     assert retained.company_id == company.pk
     assert retained.private_notes == "Other candidate private note."
     retained_requirement = ApplicationSkillRequirement.objects.get(application=retained)
-    assert retained_requirement.concept_id == concept.pk
+    assert retained_requirement.alias.concept_id == concept.pk
 
 
 @pytest.mark.django_db

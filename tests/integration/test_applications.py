@@ -1,9 +1,12 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from zoneinfo import ZoneInfo
 
 import pytest
 from allauth.account.models import EmailAddress
-from django.db import IntegrityError, connection, transaction
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
@@ -17,7 +20,12 @@ from apps.applications.models import (
     RecruitmentEvent,
     StageTransition,
 )
-from apps.applications.services import create_or_reuse_company, transition_application
+from apps.applications.services import (
+    create_application_skill_requirement,
+    create_or_reuse_company,
+    remap_application_skill_requirement,
+    transition_application,
+)
 from apps.campaigns.models import Campaign
 from apps.profiles.models import (
     CandidateProfile,
@@ -28,8 +36,13 @@ from apps.profiles.models import (
     ProjectSkill,
 )
 from apps.skills.models import SkillAlias, SkillConcept
+from apps.skills.services import rename_skill_alias, rename_skill_concept, resolve_skill_alias
 
 pytestmark = pytest.mark.integration
+
+
+def canonical_alias(concept: SkillConcept) -> SkillAlias:
+    return SkillAlias.objects.get(concept=concept, is_canonical=True)
 
 
 def verified_candidate(email: str) -> Account:
@@ -987,17 +1000,20 @@ def test_candidate_can_add_skill_requirements_with_aliases_unknown_labels_and_ht
     assert unknown.status_code == 200
     assert unknown.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
     assert ApplicationSkillRequirement.objects.filter(application=application).count() == 2
-    node_requirement = ApplicationSkillRequirement.objects.get(concept=concept)
-    assert node_requirement.label == "NodeJS"
+    node_requirement = ApplicationSkillRequirement.objects.get(alias__concept=concept)
+    assert node_requirement.alias.display_name == "NodeJS"
+    assert node_requirement.alias.normalized_value == "nodejs"
     assert node_requirement.classification == ApplicationSkillRequirement.Classification.REQUIRED
-    kubernetes_requirement = ApplicationSkillRequirement.objects.get(label="Kubernetes")
+    kubernetes_requirement = ApplicationSkillRequirement.objects.get(
+        alias__normalized_value="kubernetes"
+    )
     assert (
         kubernetes_requirement.classification
         == ApplicationSkillRequirement.Classification.PREFERRED
     )
     assert b"Required skill requirements" in detail.content
     assert b"Preferred skill requirements" in detail.content
-    assert b"Node.js" in detail.content
+    assert b"NodeJS" in detail.content
     assert b"Kubernetes" in detail.content
     removed = client.post(
         reverse(
@@ -1013,9 +1029,7 @@ def test_candidate_can_add_skill_requirements_with_aliases_unknown_labels_and_ht
 
 
 @pytest.mark.django_db
-def test_application_skill_requirement_schema_has_label_constraint_without_normalized_column() -> (
-    None
-):
+def test_application_skill_requirement_schema_references_only_a_skill_alias() -> None:
     account = verified_candidate("requirement-schema@example.com")
     company, _ = create_or_reuse_company("Example", "example.com")
     application = JobApplication.objects.create(
@@ -1037,10 +1051,13 @@ def test_application_skill_requirement_schema_has_label_constraint_without_norma
                 cursor, model._meta.db_table
             )
         }
-    assert "normalized_label" not in columns
-    assert "application_skill_requirement_label_not_blank" in {
-        constraint.name for constraint in model._meta.constraints
-    }
+    assert "label" not in columns
+    assert "concept_id" not in columns
+    assert "alias_id" in columns
+    constraint_names = {constraint.name for constraint in model._meta.constraints}
+    assert "application_skill_requirement_unique_concept" not in constraint_names
+    assert "application_skill_requirement_label_not_blank" not in constraint_names
+    assert "application_skill_requirement_valid_classification" in constraint_names
 
     with pytest.raises(IntegrityError):
         with transaction.atomic():
@@ -1048,9 +1065,8 @@ def test_application_skill_requirement_schema_has_label_constraint_without_norma
                 [
                     model(
                         application=application,
-                        concept=concept,
-                        label="",
-                        classification=model.Classification.REQUIRED,
+                        alias=canonical_alias(concept),
+                        classification="mandatory",
                     )
                 ]
             )
@@ -1097,7 +1113,10 @@ def test_candidate_can_extract_catalog_skills_with_aliases_and_punctuation_bound
     requirements = list(
         ApplicationSkillRequirement.objects.filter(application=application).order_by("pk")
     )
-    assert [(requirement.concept_id, requirement.label) for requirement in requirements] == [
+    assert [
+        (requirement.alias.concept_id, requirement.alias.display_name)
+        for requirement in requirements
+    ] == [
         (python.pk, "Python"),
         (node.pk, "NodeJS"),
         (c_plus_plus.pk, "C++"),
@@ -1114,7 +1133,7 @@ def test_candidate_can_extract_catalog_skills_with_aliases_and_punctuation_bound
 
 
 @pytest.mark.django_db
-def test_extraction_preserves_source_wording_for_normalized_unicode_matches() -> None:
+def test_extraction_displays_shared_alias_wording_for_normalized_unicode_matches() -> None:
     account = verified_candidate("requirement-extract-unicode@example.com")
     company, _ = create_or_reuse_company("Example", "example.com")
     application = JobApplication.objects.create(
@@ -1134,8 +1153,8 @@ def test_extraction_preserves_source_wording_for_normalized_unicode_matches() ->
 
     requirement = ApplicationSkillRequirement.objects.get(application=application)
     assert response.status_code == 302
-    assert requirement.concept_id == concept.pk
-    assert requirement.label == "Cafe\N{COMBINING ACUTE ACCENT}"
+    assert requirement.alias.concept_id == concept.pk
+    assert requirement.alias.display_name == "Caf\N{LATIN SMALL LETTER E WITH ACUTE}"
 
 
 @pytest.mark.django_db
@@ -1159,11 +1178,12 @@ def test_extraction_preserves_reviewed_and_manual_requirements_and_retains_stale
         reverse("application_skill_requirement_create", args=[application.pk]),
         {"label": "Python", "classification": ApplicationSkillRequirement.Classification.REQUIRED},
     )
-    reviewed = ApplicationSkillRequirement.objects.get(application=application, concept=python)
+    reviewed = ApplicationSkillRequirement.objects.get(
+        application=application, alias__concept=python
+    )
     edited_reviewed = client.post(
         reverse("application_skill_requirement_edit", args=[application.pk, reviewed.pk]),
         {
-            "label": "Python in production",
             "classification": ApplicationSkillRequirement.Classification.REQUIRED,
         },
     )
@@ -1174,11 +1194,10 @@ def test_extraction_preserves_reviewed_and_manual_requirements_and_retains_stale
             "classification": ApplicationSkillRequirement.Classification.REQUIRED,
         },
     )
-    manual = ApplicationSkillRequirement.objects.get(application=application, concept=django)
+    manual = ApplicationSkillRequirement.objects.get(application=application, alias__concept=django)
     edited_manual = client.post(
         reverse("application_skill_requirement_edit", args=[application.pk, manual.pk]),
         {
-            "label": "Django REST Framework",
             "classification": ApplicationSkillRequirement.Classification.REQUIRED,
         },
     )
@@ -1194,7 +1213,7 @@ def test_extraction_preserves_reviewed_and_manual_requirements_and_retains_stale
     reviewed.refresh_from_db()
     manual.refresh_from_db()
     node_requirement = ApplicationSkillRequirement.objects.get(
-        application=application, concept=node
+        application=application, alias__concept=node
     )
     assert created_reviewed.status_code == 302
     assert edited_reviewed.status_code == 302
@@ -1202,11 +1221,11 @@ def test_extraction_preserves_reviewed_and_manual_requirements_and_retains_stale
     assert edited_manual.status_code == 302
     assert first.status_code == 302
     assert second.status_code == 302
-    assert reviewed.label == "Python in production"
+    assert reviewed.alias.display_name == "Python"
     assert reviewed.classification == ApplicationSkillRequirement.Classification.REQUIRED
-    assert manual.label == "Django REST Framework"
+    assert manual.alias.display_name == "Django"
     assert manual.classification == ApplicationSkillRequirement.Classification.REQUIRED
-    assert node_requirement.label == "Node.js"
+    assert node_requirement.alias.display_name == "Node.js"
     assert node_requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
     assert ApplicationSkillRequirement.objects.filter(application=application).count() == 3
 
@@ -1239,9 +1258,7 @@ def test_skill_requirement_extraction_is_private_to_the_application_owner() -> N
 
 
 @pytest.mark.django_db
-def test_candidate_can_edit_requirement_wording_without_remapping_and_can_deliberately_remap() -> (
-    None
-):
+def test_candidate_can_edit_requirement_classification_and_deliberately_remap() -> None:
     account = verified_candidate("requirement-edit@example.com")
     company, _ = create_or_reuse_company("Example", "example.com")
     application = JobApplication.objects.create(
@@ -1257,8 +1274,7 @@ def test_candidate_can_edit_requirement_wording_without_remapping_and_can_delibe
     django = SkillConcept.objects.create(canonical_name="Django")
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=node,
-        label="Node.js",
+        alias=canonical_alias(node),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     client = Client()
@@ -1267,14 +1283,12 @@ def test_candidate_can_edit_requirement_wording_without_remapping_and_can_delibe
     edited = client.post(
         reverse("application_skill_requirement_edit", args=[application.pk, requirement.pk]),
         {
-            "label": "Node.js in production",
             "classification": ApplicationSkillRequirement.Classification.PREFERRED,
         },
     )
     requirement.refresh_from_db()
-    assert requirement.label == "Node.js in production"
     assert requirement.classification == ApplicationSkillRequirement.Classification.PREFERRED
-    assert requirement.concept_id == node.pk
+    assert requirement.alias.concept_id == node.pk
     remapped = client.post(
         reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),
         {"label": "Django"},
@@ -1285,8 +1299,8 @@ def test_candidate_can_edit_requirement_wording_without_remapping_and_can_delibe
     assert remapped.status_code == 200
     assert remapped.headers["HX-Redirect"] == reverse("application_detail", args=[application.pk])
     requirement.refresh_from_db()
-    assert requirement.label == "Django"
-    assert requirement.concept_id == django.pk
+    assert requirement.alias.display_name == "Django"
+    assert requirement.alias.concept_id == django.pk
 
 
 @pytest.mark.django_db
@@ -1309,8 +1323,7 @@ def test_requirement_duplicate_and_invalid_input_returns_focused_feedback_withou
     )
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     client = Client()
@@ -1337,7 +1350,260 @@ def test_requirement_duplicate_and_invalid_input_returns_focused_feedback_withou
     assert b"Select a valid choice" in invalid_classification.content
     assert ApplicationSkillRequirement.objects.count() == 1
     assert SkillConcept.objects.filter(canonical_key="rust").count() == 0
-    assert requirement.concept_id == concept.pk
+    assert requirement.alias.concept_id == concept.pk
+
+
+@pytest.mark.django_db
+def test_remapping_onto_an_existing_effective_concept_collapses_with_required_wins() -> None:
+    account = verified_candidate("requirement-collapse@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    react = SkillConcept.objects.create(canonical_name="React")
+    redux = SkillConcept.objects.create(canonical_name="Redux")
+    SkillAlias.objects.create(concept=react, display_name="ReactJS")
+    destination = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(react),
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    duplicate = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(redux),
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    remapped = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, duplicate.pk]),
+        {"label": "ReactJS"},
+        follow=True,
+    )
+
+    assert remapped.status_code == 200
+    assert b"were merged" in remapped.content
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 1
+    assert not ApplicationSkillRequirement.objects.filter(pk=duplicate.pk).exists()
+    destination.refresh_from_db()
+    assert destination.alias.display_name == "React"
+    assert destination.classification == ApplicationSkillRequirement.Classification.REQUIRED
+
+
+@pytest.mark.django_db
+def test_remapping_onto_a_required_requirement_keeps_it_required_and_drops_the_duplicate() -> None:
+    account = verified_candidate("requirement-collapse-required@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    react = SkillConcept.objects.create(canonical_name="React")
+    redux = SkillConcept.objects.create(canonical_name="Redux")
+    destination = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(react),
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    duplicate = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(redux),
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    remapped = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, duplicate.pk]),
+        {"label": "React"},
+    )
+
+    assert remapped.status_code == 302
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 1
+    assert not ApplicationSkillRequirement.objects.filter(pk=duplicate.pk).exists()
+    destination.refresh_from_db()
+    assert destination.classification == ApplicationSkillRequirement.Classification.REQUIRED
+
+
+@pytest.mark.django_db
+def test_remapping_to_another_alias_of_the_same_concept_keeps_one_requirement() -> None:
+    account = verified_candidate("requirement-reword@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    node = SkillConcept.objects.create(canonical_name="Node.js")
+    nodejs = SkillAlias.objects.create(concept=node, display_name="NodeJS")
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(node),
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    remapped = client.post(
+        reverse("application_skill_requirement_remap", args=[application.pk, requirement.pk]),
+        {"label": "NodeJS"},
+        follow=True,
+    )
+
+    assert remapped.status_code == 200
+    assert b"were merged" not in remapped.content
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 1
+    requirement.refresh_from_db()
+    assert requirement.alias_id == nodejs.pk
+    assert requirement.alias.concept_id == node.pk
+    assert requirement.classification == ApplicationSkillRequirement.Classification.REQUIRED
+
+
+@pytest.mark.django_db
+def test_requirement_wording_follows_its_alias_through_catalog_wording_changes() -> None:
+    account = verified_candidate("requirement-wording@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    node = SkillConcept.objects.create(canonical_name="Node.js")
+    nodejs = SkillAlias.objects.create(concept=node, display_name="NodeJS")
+    requirement = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=nodejs,
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    client = Client()
+    client.force_login(account)
+
+    rename_skill_alias(alias=nodejs, display_name="Node JS")
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+
+    requirement.refresh_from_db()
+    assert requirement.alias_id == nodejs.pk
+    assert requirement.alias.concept_id == node.pk
+    assert requirement.alias.display_name == "Node JS"
+    assert b"Node JS" in detail.content
+
+    rename_skill_concept(concept=node, canonical_name="Node.js runtime")
+    detail = client.get(reverse("application_detail", args=[application.pk]))
+
+    requirement.refresh_from_db()
+    assert requirement.alias_id == nodejs.pk
+    assert requirement.alias.display_name == "Node JS"
+    assert canonical_alias(node).display_name == "Node.js runtime"
+    assert b"Node JS" in detail.content
+
+
+@pytest.mark.skipif(
+    connection.vendor == "sqlite",
+    reason="Effective-concept uniqueness depends on PostgreSQL row locking.",
+)
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_requirement_creation_enforces_one_effective_concept() -> None:
+    account = verified_candidate("requirement-concurrent-create@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    resolve_skill_alias("Elixir")
+    barrier = Barrier(2)
+
+    def create(_: int) -> str:
+        close_old_connections()
+        try:
+            barrier.wait()
+            create_application_skill_requirement(
+                account=account,
+                application_id=application.pk,
+                label="Elixir",
+                classification=ApplicationSkillRequirement.Classification.PREFERRED,
+            )
+            return "created"
+        except ValidationError:
+            return "rejected"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(create, range(2)))
+
+    assert results.count("created") == 1
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 1
+
+
+@pytest.mark.skipif(
+    connection.vendor == "sqlite",
+    reason="Effective-concept uniqueness depends on PostgreSQL row locking.",
+)
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_requirement_remap_collapses_to_one_effective_concept() -> None:
+    account = verified_candidate("requirement-concurrent-collapse@example.com")
+    company, _ = create_or_reuse_company("Example", "example.com")
+    application = JobApplication.objects.create(
+        account=account,
+        campaign=Campaign.objects.get(account=account),
+        company=company,
+        role_title="Platform engineer",
+        job_description="Build dependable systems.",
+    )
+    react = resolve_skill_alias("React")[0].concept
+    redux = resolve_skill_alias("Redux")[0].concept
+    destination = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(react),
+        classification=ApplicationSkillRequirement.Classification.PREFERRED,
+    )
+    duplicate = ApplicationSkillRequirement.objects.create(
+        application=application,
+        alias=canonical_alias(redux),
+        classification=ApplicationSkillRequirement.Classification.REQUIRED,
+    )
+    barrier = Barrier(2)
+
+    def remap(wording: str) -> str:
+        close_old_connections()
+        try:
+            barrier.wait()
+            remap_application_skill_requirement(
+                account=account,
+                application_id=application.pk,
+                requirement_id=duplicate.pk,
+                label=wording,
+            )
+            return "remapped"
+        except ApplicationSkillRequirement.DoesNotExist:
+            return "collapsed-elsewhere"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(remap, ["React", "react"]))
+
+    assert results.count("remapped") == 1
+    assert results.count("collapsed-elsewhere") == 1
+    assert not ApplicationSkillRequirement.objects.filter(pk=duplicate.pk).exists()
+    assert ApplicationSkillRequirement.objects.filter(application=application).count() == 1
+    destination.refresh_from_db()
+    assert destination.classification == ApplicationSkillRequirement.Classification.REQUIRED
 
 
 @pytest.mark.django_db
@@ -1358,8 +1624,7 @@ def test_skill_requirements_are_private_and_cascade_without_deleting_shared_cata
     )
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     client = Client()
@@ -1373,7 +1638,6 @@ def test_skill_requirements_are_private_and_cascade_without_deleting_shared_cata
     edit = client.post(
         reverse("application_skill_requirement_edit", args=[application.pk, requirement.pk]),
         {
-            "label": "Changed",
             "classification": ApplicationSkillRequirement.Classification.PREFERRED,
         },
     )
@@ -1418,7 +1682,7 @@ def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence
         job_description="Build dependable systems.",
     )
     node = SkillConcept.objects.create(canonical_name="Node.js")
-    SkillAlias.objects.create(concept=node, display_name="NodeJS")
+    nodejs = SkillAlias.objects.create(concept=node, display_name="NodeJS")
     python = SkillConcept.objects.create(canonical_name="Python")
     django = SkillConcept.objects.create(canonical_name="Django")
     rust = SkillConcept.objects.create(canonical_name="Rust")
@@ -1443,48 +1707,20 @@ def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence
     ExperienceSkill.objects.create(experience=experience, concept=go)
     ProjectSkill.objects.create(project=project, concept=django)
     ProjectSkill.objects.create(project=project, concept=vue)
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=node,
-        label="Node.js",
-        classification=ApplicationSkillRequirement.Classification.REQUIRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=python,
-        label="Python",
-        classification=ApplicationSkillRequirement.Classification.REQUIRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=rust,
-        label="Rust",
-        classification=ApplicationSkillRequirement.Classification.REQUIRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=go,
-        label="Go",
-        classification=ApplicationSkillRequirement.Classification.REQUIRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=django,
-        label="Django",
-        classification=ApplicationSkillRequirement.Classification.PREFERRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=elixir,
-        label="Elixir",
-        classification=ApplicationSkillRequirement.Classification.PREFERRED,
-    )
-    ApplicationSkillRequirement.objects.create(
-        application=application,
-        concept=vue,
-        label="Vue",
-        classification=ApplicationSkillRequirement.Classification.PREFERRED,
-    )
+    for alias, classification in [
+        (nodejs, ApplicationSkillRequirement.Classification.REQUIRED),
+        (canonical_alias(python), ApplicationSkillRequirement.Classification.REQUIRED),
+        (canonical_alias(rust), ApplicationSkillRequirement.Classification.REQUIRED),
+        (canonical_alias(go), ApplicationSkillRequirement.Classification.REQUIRED),
+        (canonical_alias(django), ApplicationSkillRequirement.Classification.PREFERRED),
+        (canonical_alias(elixir), ApplicationSkillRequirement.Classification.PREFERRED),
+        (canonical_alias(vue), ApplicationSkillRequirement.Classification.PREFERRED),
+    ]:
+        ApplicationSkillRequirement.objects.create(
+            application=application,
+            alias=alias,
+            classification=classification,
+        )
     client = Client()
     client.force_login(account)
 
@@ -1496,7 +1732,8 @@ def test_application_detail_shows_live_skill_coverage_and_all_candidate_evidence
     assert response.content.count(b'data-skill-coverage-item="missing-required"') == 1
     assert response.content.count(b'data-skill-coverage-item="matched-preferred"') == 2
     assert response.content.count(b'data-skill-coverage-item="missing-preferred"') == 1
-    assert b"Node.js" in response.content
+    assert b"NodeJS" in response.content
+    assert b"Effective concept: Node.js" in response.content
     assert b"Rust" in response.content
     assert b"Django" in response.content
     assert b"Elixir" in response.content
@@ -1524,8 +1761,7 @@ def test_application_detail_recalculates_live_coverage_after_changes() -> None:
     python = SkillConcept.objects.create(canonical_name="Python")
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=python,
-        label="Python",
+        alias=canonical_alias(python),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     client = Client()
@@ -1566,8 +1802,7 @@ def test_skill_coverage_is_isolated_from_other_accounts() -> None:
     ProfileSkill.objects.create(profile=owner.candidate_profile, concept=concept)
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     client = Client()

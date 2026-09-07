@@ -15,6 +15,7 @@ from apps.skills.services import (
     normalize_skill_label,
     rename_skill_alias,
     rename_skill_concept,
+    resolve_skill_alias,
     resolve_skill_label,
     skill_catalog_issues,
 )
@@ -68,6 +69,43 @@ def test_unknown_label_creates_a_reusable_concept_and_preserves_display_form() -
     assert concept.canonical_key == "typescript"
     alias = SkillAlias.objects.get(concept=concept, normalized_value="typescript")
     assert alias.display_name == "TypeScript"
+
+
+@pytest.mark.django_db
+def test_alias_wording_and_canonical_names_resolve_to_one_shared_alias() -> None:
+    concept = SkillConcept.objects.create(canonical_name="Node.js")
+    nodejs = SkillAlias.objects.create(concept=concept, display_name="NodeJS")
+
+    alias_match, alias_created = resolve_skill_alias("  nodejs ")
+    canonical_match, canonical_created = resolve_skill_alias("NODE.JS")
+
+    assert alias_match == nodejs
+    assert alias_created is False
+    assert canonical_match == SkillAlias.objects.get(concept=concept, is_canonical=True)
+    assert canonical_created is False
+    assert SkillConcept.objects.count() == 1
+    assert SkillAlias.objects.filter(concept=concept).count() == 2
+
+
+@pytest.mark.django_db
+def test_unknown_wording_resolves_to_the_new_concepts_canonical_alias() -> None:
+    alias, created = resolve_skill_alias("  TypeScript  ")
+
+    reused, reused_created = resolve_skill_alias("typescript")
+
+    assert created is True
+    assert reused_created is False
+    assert reused == alias
+    assert alias.is_canonical is True
+    assert alias.display_name == "TypeScript"
+    assert alias.concept.canonical_name == "TypeScript"
+    assert alias.concept.canonical_key == "typescript"
+
+
+@pytest.mark.django_db
+def test_resolve_skill_alias_rejects_a_blank_wording() -> None:
+    with pytest.raises(ValidationError):
+        resolve_skill_alias(" \t ")
 
 
 @pytest.mark.django_db(transaction=True)

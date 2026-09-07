@@ -28,7 +28,7 @@ from apps.profiles.models import (
     Project,
     ProjectSkill,
 )
-from apps.skills.models import SkillConcept
+from apps.skills.models import SkillAlias, SkillConcept
 from apps.skills.services import resolve_skill_label
 
 pytestmark = pytest.mark.integration
@@ -95,8 +95,7 @@ def create_private_data(account: Account, company: Company) -> JobApplication:
     )
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=SkillAlias.objects.get(concept=concept, is_canonical=True),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     return application

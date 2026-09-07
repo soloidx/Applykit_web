@@ -7,7 +7,7 @@ from django.db import models
 from django.db.models import Q
 
 from apps.campaigns.models import Campaign
-from apps.skills.models import SkillConcept, clean_skill_label
+from apps.skills.models import SkillAlias
 
 
 class Company(models.Model):
@@ -77,12 +77,11 @@ class ApplicationSkillRequirement(models.Model):
         on_delete=models.CASCADE,
         related_name="skill_requirements",
     )
-    concept = models.ForeignKey(
-        SkillConcept,
+    alias = models.ForeignKey(
+        SkillAlias,
         on_delete=models.PROTECT,
         related_name="application_requirements",
     )
-    label = models.CharField(max_length=200)
     classification = models.CharField(max_length=16, choices=Classification.choices)
     edit_form: Any
     remap_form: Any
@@ -90,14 +89,6 @@ class ApplicationSkillRequirement(models.Model):
     class Meta:
         ordering = ["classification", "id"]
         constraints = [
-            models.UniqueConstraint(
-                fields=["application", "concept"],
-                name="application_skill_requirement_unique_concept",
-            ),
-            models.CheckConstraint(
-                condition=~Q(label=""),
-                name="application_skill_requirement_label_not_blank",
-            ),
             models.CheckConstraint(
                 condition=Q(classification__in=["required", "preferred"]),
                 name="application_skill_requirement_valid_classification",
@@ -105,20 +96,7 @@ class ApplicationSkillRequirement(models.Model):
         ]
 
     def __str__(self) -> str:
-        return self.label
-
-    def clean(self) -> None:
-        super().clean()
-        try:
-            self.label = clean_skill_label(self.label)
-        except ValidationError as error:
-            raise ValidationError({"label": error.messages}) from error
-        if self.classification not in self.Classification.values:
-            raise ValidationError({"classification": "Select a valid requirement classification."})
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        self.label = clean_skill_label(self.label)
-        super().save(*args, **kwargs)
+        return self.alias.display_name
 
 
 class StageTransition(models.Model):

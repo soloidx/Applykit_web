@@ -42,10 +42,14 @@ from apps.resumes.models import (
     ResumeSkill,
 )
 from apps.resumes.services import build_resume_default_draft, build_resume_document, open_resume
-from apps.skills.models import SkillConcept
+from apps.skills.models import SkillAlias, SkillConcept
 from apps.skills.services import rename_skill_concept
 
 pytestmark = pytest.mark.integration
+
+
+def canonical_alias(concept: SkillConcept) -> SkillAlias:
+    return SkillAlias.objects.get(concept=concept, is_canonical=True)
 
 
 def verified_candidate(email: str) -> Account:
@@ -379,8 +383,7 @@ def test_application_deletion_cascades_resume_and_requirement_but_not_profile_so
     concept = SkillConcept.objects.create(canonical_name="Python")
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     profile = account.candidate_profile
@@ -405,20 +408,17 @@ def test_open_resume_initializes_sections_membership_and_deterministic_skills_on
     unmatched = SkillConcept.objects.create(canonical_name="Rust")
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=required_high_evidence,
-        label="Python",
+        alias=canonical_alias(required_high_evidence),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=required_low_evidence,
-        label="Django",
+        alias=canonical_alias(required_low_evidence),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=preferred,
-        label="PostgreSQL",
+        alias=canonical_alias(preferred),
         classification=ApplicationSkillRequirement.Classification.PREFERRED,
     )
     first_experience = Experience.objects.create(
@@ -488,8 +488,7 @@ def test_resume_default_draft_rebuilds_current_sources_and_requirement_relevance
     required = SkillConcept.objects.create(canonical_name="Python")
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=required,
-        label="Python",
+        alias=canonical_alias(required),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     experience = Experience.objects.create(
@@ -533,8 +532,7 @@ def test_resume_reset_has_no_javascript_confirmation_and_rebuilds_relevance_on_s
     application = application_for(account)
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=sources["concept"],
-        label="Django",
+        alias=canonical_alias(sources["concept"]),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     resume, _created = open_resume(account=account, application_id=application.pk)
@@ -1057,8 +1055,7 @@ def test_new_project_skill_appends_without_reordering_or_recomputing_relevance()
     application = application_for(account)
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=existing_concept,
-        label="Python",
+        alias=canonical_alias(existing_concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     resume, _created = open_resume(account=account, application_id=application.pk)
@@ -1089,8 +1086,7 @@ def test_requirement_changes_do_not_rewrite_saved_resume_structure_without_reset
     application = application_for(account)
     requirement = ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     resume, _created = open_resume(account=account, application_id=application.pk)
@@ -1102,8 +1098,7 @@ def test_requirement_changes_do_not_rewrite_saved_resume_structure_without_reset
     replacement = SkillConcept.objects.create(canonical_name="Django")
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=replacement,
-        label="Django",
+        alias=canonical_alias(replacement),
         classification=ApplicationSkillRequirement.Classification.PREFERRED,
     )
     payload = modern_resume_post(Resume.objects.get(pk=resume.pk))
@@ -1208,8 +1203,7 @@ def test_resume_detail_renders_source_rail_and_move_controls_markup() -> None:
     Project.objects.create(profile=profile, name="Toolkit", description="A toolkit.")
     ApplicationSkillRequirement.objects.create(
         application=application,
-        concept=concept,
-        label="Python",
+        alias=canonical_alias(concept),
         classification=ApplicationSkillRequirement.Classification.REQUIRED,
     )
     resume, _created = open_resume(account=account, application_id=application.pk)

@@ -75,8 +75,11 @@ class ApplicationSkillRequirementCreateForm(forms.Form):
         return clean_skill_label(self.cleaned_data["label"])
 
 
-class ApplicationSkillRequirementEditForm(ApplicationSkillRequirementCreateForm):
-    pass
+class ApplicationSkillRequirementEditForm(forms.Form):
+    classification = forms.ChoiceField(
+        choices=ApplicationSkillRequirement.Classification.choices,
+        label="Requirement type",
+    )
 
 
 class ApplicationSkillRequirementRemapForm(forms.Form):
