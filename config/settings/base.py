@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "apps.skills",
     "apps.cover_letters",
     "apps.resumes",
+    "apps.documents",
     "apps.core",
 ]
 
@@ -110,3 +111,17 @@ LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+
+# Document extraction boundary limits. Callers cannot override these values.
+DOCUMENT_EXTRACTION = {
+    "MAX_UPLOAD_BYTES": 10 * 1024 * 1024,
+    "MAX_MEMBERS": 2000,
+    "MAX_EXPANDED_BYTES": 256 * 1024 * 1024,
+    "MAX_MEMBER_BYTES": 64 * 1024 * 1024,
+    "MAX_TEXT_CODE_POINTS": 100_000,
+    "CPU_SECONDS": 10,
+    "WALL_SECONDS": 15,
+    "MEMORY_BYTES": 512 * 1024 * 1024,
+    "TEMP_ROOT": env("DOCUMENT_TEMP_ROOT", default="") or None,
+    "REQUIRE_LINUX_ISOLATION": False,
+}

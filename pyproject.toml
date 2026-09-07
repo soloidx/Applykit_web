@@ -10,8 +10,10 @@ dependencies = [
     "django-anymail[resend]>=13.1,<14.0",
     "django-environ>=0.12,<1.0",
     "gunicorn>=23.0,<24.0",
+    "mammoth>=1.12.1",
     "psycopg[binary]>=3.2,<4.0",
     "publicsuffix2>=2.20191221",
+    "python-docx>=1.2.0",
     "whitenoise>=6.9,<7.0",
 ]
 
@@ -34,6 +36,7 @@ markers = [
     "browser: tests that require a Playwright browser",
     "integration: tests requiring Django and database access",
     "unit: tests that do not require Django or database access",
+    "linux_container: tests that require Linux container isolation",
 ]
 
 [tool.ruff]

@@ -34,3 +34,6 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+
+# Production fails closed unless the Linux isolation path is available.
+DOCUMENT_EXTRACTION = {**DOCUMENT_EXTRACTION, "REQUIRE_LINUX_ISOLATION": True}  # noqa: F405
