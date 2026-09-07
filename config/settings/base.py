@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "apps.cover_letters",
     "apps.resumes",
     "apps.documents",
+    "apps.ai",
     "apps.core",
 ]
 
@@ -126,3 +127,9 @@ DOCUMENT_EXTRACTION = {
     "TEMP_ROOT": env("DOCUMENT_TEMP_ROOT", default="") or None,
     "REQUIRE_LINUX_ISOLATION": False,
 }
+
+# The global AI consent-policy identifier. It is copied onto the consent
+# preference at acceptance; changing it invalidates earlier acceptance and
+# requires renewed consent. Operators change it only for a material policy
+# change; callers and candidates cannot override it.
+AI_CONSENT = {"POLICY": env("AI_CONSENT_POLICY", default="2026-09-initial-ai-imports")}

@@ -9,6 +9,7 @@ from django.urls import reverse
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
 from apps.accounts.services import delete_account
+from apps.ai.services import consent_status
 
 
 def _redirect_after_deletion(request: HttpRequest) -> HttpResponse:
@@ -17,6 +18,19 @@ def _redirect_after_deletion(request: HttpRequest) -> HttpResponse:
         response["HX-Redirect"] = reverse("home")
         return response
     return redirect("home")
+
+
+@login_required
+@verified_account_required
+def account_home(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    if request.method != "GET":
+        return HttpResponse(status=405)
+    return render(
+        request,
+        "account/home.html",
+        {"consent": consent_status(account)},
+    )
 
 
 @login_required
