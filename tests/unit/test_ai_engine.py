@@ -121,7 +121,18 @@ class TestRetryClassification:
         outcome, fake = harness.run(transport.TransportNetworkError(), http_result(success_body()))
 
         assert outcome.ok is True
+        assert outcome.attempts == 2
         assert fake.call_count == 2
+
+    def test_outcome_reports_the_attempt_count(self, harness: Harness) -> None:
+        single, _ = harness.run(http_result(success_body()))
+        exhausted, _ = harness.run(
+            transport.TransportNetworkError(),
+            transport.TransportNetworkError(),
+        )
+
+        assert single.attempts == 1
+        assert exhausted.attempts == 2
 
     def test_transport_timeout_is_retryable(self, harness: Harness) -> None:
         outcome, fake = harness.run(transport.TransportTimeout(), http_result(success_body()))

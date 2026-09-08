@@ -4,6 +4,7 @@ import pytest
 from django.test import override_settings
 
 from apps.ai.conf import (
+    DEFAULT_ACCOUNT_COST_CEILING,
     DEFAULT_DEADLINE_SECONDS,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_INPUT_TOKENS,
@@ -101,6 +102,38 @@ def test_attempts_below_one_are_rejected() -> None:
 def test_non_positive_price_ceiling_is_rejected() -> None:
     with pytest.raises(ConfigurationError):
         feature_config(FEATURE_JOB_POSTING)
+
+
+@override_settings(AI_IMPORTS=enabled_settings())
+def test_account_cost_ceiling_defaults_and_is_typed() -> None:
+    configured = feature_config(FEATURE_CANDIDATE_PROFILE)
+
+    assert (
+        configured.account_cost_ceiling
+        == decimal.Decimal(DEFAULT_ACCOUNT_COST_CEILING)
+        == decimal.Decimal("5.00")
+    )
+
+    with override_settings(AI_IMPORTS=enabled_settings(ACCOUNT_COST_CEILING="12.34")):
+        assert feature_config(FEATURE_JOB_POSTING).account_cost_ceiling == decimal.Decimal("12.34")
+
+
+@override_settings(AI_IMPORTS=enabled_settings(ACCOUNT_COST_CEILING="0"))
+def test_non_positive_account_cost_ceiling_is_rejected() -> None:
+    with pytest.raises(ConfigurationError):
+        feature_config(FEATURE_CANDIDATE_PROFILE)
+
+
+@override_settings(AI_IMPORTS=enabled_settings(ACCOUNT_COST_CEILING="bad"))
+def test_malformed_account_cost_ceiling_is_rejected() -> None:
+    with pytest.raises(ConfigurationError):
+        feature_config(FEATURE_CANDIDATE_PROFILE)
+
+
+@override_settings(AI_IMPORTS=enabled_settings(ACCOUNT_COST_CEILING="0.10"))
+def test_account_cost_ceiling_below_the_per_request_reserve_is_rejected() -> None:
+    with pytest.raises(ConfigurationError):
+        feature_config(FEATURE_CANDIDATE_PROFILE)
 
 
 @override_settings(AI_IMPORTS=enabled_settings(BASE_URL="not-a-url"))

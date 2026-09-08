@@ -138,6 +138,7 @@ def test_account_controls_show_consent_and_allow_withdrawal() -> None:
     assert "AI data use consent" in content
     assert "accepted" in content.lower()
     assert "withdraw" in content.lower()
+    assert "See your AI data" in content
 
     withdrawal = client.post(
         reverse("ai_consent"),

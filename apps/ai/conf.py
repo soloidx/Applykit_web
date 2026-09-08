@@ -21,6 +21,7 @@ __all__ = [
     "DEFAULT_MAX_INPUT_TOKENS",
     "DEFAULT_MAX_OUTPUT_TOKENS",
     "DEFAULT_PRICE_CEILING",
+    "DEFAULT_ACCOUNT_COST_CEILING",
     "AISettings",
     "FeatureConfig",
     "ConfigurationError",
@@ -38,6 +39,7 @@ DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_INPUT_TOKENS = 60_000
 DEFAULT_MAX_OUTPUT_TOKENS = 8_000
 DEFAULT_PRICE_CEILING = "0.50"
+DEFAULT_ACCOUNT_COST_CEILING = "5.00"
 
 DEFAULT_CONSENT_POLICY = "2026-09-initial-ai-imports"
 
@@ -59,6 +61,7 @@ class AISettings:
     max_input_tokens: int
     max_output_tokens: int
     price_ceiling: decimal.Decimal
+    account_cost_ceiling: decimal.Decimal
     feature_models: dict[str, str]
 
 
@@ -75,6 +78,7 @@ class FeatureConfig:
     max_input_tokens: int
     max_output_tokens: int
     price_ceiling: decimal.Decimal
+    account_cost_ceiling: decimal.Decimal
 
 
 def current_settings() -> AISettings:
@@ -92,7 +96,12 @@ def current_settings() -> AISettings:
         max_output_tokens=_int_setting(
             configured, "MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS, "output_limit"
         ),
-        price_ceiling=_decimal_setting(configured, "PRICE_CEILING", "price_ceiling"),
+        price_ceiling=_decimal_setting(
+            configured, "PRICE_CEILING", DEFAULT_PRICE_CEILING, "price_ceiling"
+        ),
+        account_cost_ceiling=_decimal_setting(
+            configured, "ACCOUNT_COST_CEILING", DEFAULT_ACCOUNT_COST_CEILING, "account_cost_ceiling"
+        ),
         feature_models={
             FEATURE_CANDIDATE_PROFILE: _text_setting(
                 configured, "PROFILE_MODEL", "", "profile_model"
@@ -131,6 +140,12 @@ def feature_config(feature: str) -> FeatureConfig:
         problems.append("output_limit")
     if configured.price_ceiling <= 0:
         problems.append("price_ceiling")
+    if configured.account_cost_ceiling <= 0:
+        problems.append("account_cost_ceiling")
+    elif configured.account_cost_ceiling < configured.price_ceiling:
+        # The Account ceiling can never cover the per-request reserve, so no
+        # operation could ever be admitted.
+        problems.append("account_cost_ceiling")
     if problems:
         raise ConfigurationError(", ".join(sorted(problems)))
     return FeatureConfig(
@@ -143,6 +158,7 @@ def feature_config(feature: str) -> FeatureConfig:
         max_input_tokens=configured.max_input_tokens,
         max_output_tokens=configured.max_output_tokens,
         price_ceiling=configured.price_ceiling,
+        account_cost_ceiling=configured.account_cost_ceiling,
     )
 
 
@@ -181,10 +197,10 @@ def _int_setting(configured: Any, key: str, default: int, label: str) -> int:
         raise ConfigurationError(label) from None
 
 
-def _decimal_setting(configured: Any, key: str, label: str) -> decimal.Decimal:
+def _decimal_setting(configured: Any, key: str, default: str, label: str) -> decimal.Decimal:
     value = configured.get(key)
     if value is None:
-        return decimal.Decimal(DEFAULT_PRICE_CEILING)
+        return decimal.Decimal(default)
     try:
         parsed = decimal.Decimal(str(value))
     except decimal.InvalidOperation:
@@ -192,7 +208,3 @@ def _decimal_setting(configured: Any, key: str, label: str) -> decimal.Decimal:
     if not parsed.is_finite():
         raise ConfigurationError(label)
     return parsed
-    try:
-        return decimal.Decimal(str(value))
-    except decimal.InvalidOperation:
-        return decimal.Decimal(DEFAULT_PRICE_CEILING)

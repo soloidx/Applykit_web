@@ -25,6 +25,7 @@ def feature_config(**overrides: object) -> FeatureConfig:
         "max_input_tokens": 60_000,
         "max_output_tokens": 8_000,
         "price_ceiling": decimal.Decimal("0.50"),
+        "account_cost_ceiling": decimal.Decimal("5.00"),
     }
     values.update(overrides)
     return FeatureConfig(**values)  # type: ignore[arg-type]

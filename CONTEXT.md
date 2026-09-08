@@ -174,7 +174,7 @@ The active Django app boundaries are:
 - `resumes`: application-owned Resume live overlays and deterministic initialization
 - `cover_letters`: optional application-owned Cover Letter content
 - `documents`: the Document Extraction Boundary that converts one supported upload into bounded canonical text in an isolated child process
-- `ai`: the AI capability module that owns consent preferences, content-free AI audits, task-specific extraction operations, and the private provider transport behind fixed safe failure categories
+- `ai`: the AI capability module that owns consent preferences, content-free AI audits, task-specific extraction operations, bounded admission and cost reservations, database-controlled operator switches, retention, data access, and the private provider transport behind fixed safe failure categories
 
 Preview, PDF/DOCX export, rendered files, print layout, semantic matching, asynchronous infrastructure, named document variants, version history, collaboration, immutable submission snapshots, and requiring a Resume for `Submitted` are outside the current document app boundaries. AI-assisted extraction is consent-gated and provider boundaries, retention, and handling of candidate data are decided through the AI import specification; AI-assisted research and suggestions need a separate decision before implementation.
 

@@ -14,6 +14,7 @@ import datetime
 import decimal
 import email.utils
 import json
+import math
 import socket
 import urllib.error
 import urllib.request
@@ -355,8 +356,11 @@ def _usable_usage(usage: Mapping[str, Any]) -> bool:
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             return False
     cost = usage.get("cost")
-    if cost is not None and not isinstance(cost, int | float):
-        return False
+    if cost is not None:
+        if not isinstance(cost, int | float) or isinstance(cost, bool):
+            return False
+        if not math.isfinite(float(cost)) or float(cost) < 0:
+            return False
     return True
 
 

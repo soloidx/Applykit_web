@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Your AI data | ApplyKit{% endblock %}
+
+{% block content %}
+<section id="ai-data-access" class="mx-auto max-w-3xl px-6 py-16 sm:py-24">
+  <a class="text-sm font-semibold text-coral transition hover:text-ink" href="{% url 'account_home' %}">Back to account</a>
+  <p class="mt-5 text-sm font-semibold uppercase tracking-[0.18em] text-coral">Data access</p>
+  <h1 class="mt-3 font-display text-5xl font-semibold tracking-tight">Your AI data</h1>
+  <p class="mt-5 text-lg leading-8 text-ink/70">Everything ApplyKit records about your use of AI-assisted imports.</p>
+
+  <div class="mt-8 rounded-[2rem] border border-ink/10 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+    <h2 class="font-display text-2xl font-semibold tracking-tight">AI data use consent</h2>
+    <p class="mt-4 text-sm text-ink/70">Current disclosure policy: {{ data.consent_policy }}</p>
+    {% if data.consent == 'current' %}
+    <p class="mt-4 text-base leading-7 text-ink/80">Your AI consent is accepted under the current disclosure.</p>
+    {% elif data.consent == 'renewal_required' %}
+    <p class="mt-4 text-base leading-7 text-ink/80">Your AI consent is not accepted under the current policy; renewed consent is required before any AI-assisted import.</p>
+    {% else %}
+    <p class="mt-4 text-base leading-7 text-ink/80">Your AI consent is not accepted.</p>
+    {% endif %}
+  </div>
+
+  <div class="mt-6 rounded-[2rem] border border-coral/30 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+    <h2 class="font-display text-2xl font-semibold tracking-tight">What is not here, and why</h2>
+    <p class="mt-4 text-base leading-7 text-ink/80">{{ data.content_explanation }}</p>
+  </div>
+
+  <div class="mt-6 rounded-[2rem] border border-ink/10 bg-cream p-8 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+    <h2 class="font-display text-2xl font-semibold tracking-tight">Content-free AI audits</h2>
+    {% if data.audits %}
+    <ul class="mt-6 space-y-4">
+      {% for audit in data.audits %}
+      <li class="rounded-2xl border border-ink/10 bg-white/60 p-5">
+        <p class="text-sm font-semibold">{{ audit.feature }}</p>
+        <p class="mt-1 text-sm text-ink/70">Consent policy: {{ audit.consent_policy }}</p>
+        <p class="mt-1 text-sm text-ink/70">Outcome: {{ audit.outcome }}</p>
+        <p class="mt-1 text-sm text-ink/70">Recorded: {{ audit.created_at }}</p>
+        {% if audit.model %}<p class="mt-1 text-sm text-ink/70">Model: {{ audit.model }}</p>{% endif %}
+        {% if audit.route %}<p class="mt-1 text-sm text-ink/70">Route: {{ audit.route }}</p>{% endif %}
+        <p class="mt-1 text-sm text-ink/70">Tokens: {{ audit.prompt_tokens }} in, {{ audit.completion_tokens }} out &middot; Cost: ${{ audit.cost }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="mt-4 text-base leading-7 text-ink/80">No AI operations have been recorded for your account.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -262,6 +262,12 @@ class TestResponseInterpretation:
         with pytest.raises(transport.TransportFailure):
             transport.interpret_response(result(200, body))
 
+    @pytest.mark.parametrize("cost", [-0.01, float("nan"), float("inf")])
+    def test_invalid_cost_is_rejected(self, cost: float) -> None:
+        body = completion_body(cost=cost)
+        with pytest.raises(transport.TransportFailure):
+            transport.interpret_response(result(200, body))
+
     def test_empty_content_is_rejected(self) -> None:
         body = completion_body(content="   ")
         with pytest.raises(transport.TransportFailure) as raised:

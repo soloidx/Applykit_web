@@ -8,6 +8,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from apps.accounts.access import verified_account_required
 from apps.accounts.models import Account
+from apps.ai.data_access import account_ai_data
 from apps.ai.services import accept_consent, consent_status, decline_consent, withdraw_consent
 
 
@@ -41,3 +42,16 @@ def ai_consent(request: HttpRequest) -> HttpResponse:
         withdraw_consent(account=account)
         return redirect(next_url)
     return HttpResponse(status=400)
+
+
+@login_required
+@verified_account_required
+def ai_data_access(request: HttpRequest) -> HttpResponse:
+    account = cast(Account, request.user)
+    if request.method != "GET":
+        return HttpResponse(status=405)
+    try:
+        data = account_ai_data(account)
+    except Exception:
+        return HttpResponse(status=503)
+    return render(request, "ai/data_access.html", {"data": data})

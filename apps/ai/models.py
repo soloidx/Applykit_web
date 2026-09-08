@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class ConsentPreference(models.Model):
@@ -42,6 +43,12 @@ class AIOperationAudit(models.Model):
     class Meta:
         verbose_name = "AI operation audit"
         verbose_name_plural = "AI operation audits"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(cost__gte=0),
+                name="ai_audit_cost_non_negative",
+            )
+        ]
 
     account = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -60,3 +67,74 @@ class AIOperationAudit(models.Model):
 
     def __str__(self) -> str:
         return f"{self.account.email} {self.feature}: {self.outcome}"
+
+
+class AIOperationSwitch(models.Model):
+    """An operator-controlled kill switch for AI operations.
+
+    The scope is either the global scope or one feature name. An absent row
+    means the scope is disabled, so every AI operation is disabled until an
+    operator explicitly enables the global scope and each feature. Database
+    state is checked on every admission, so a change stops new operations
+    immediately. Switches never affect manual workflows or accepted domain
+    data.
+    """
+
+    GLOBAL_SCOPE = "global"
+
+    class Meta:
+        verbose_name = "AI operation switch"
+        verbose_name_plural = "AI operation switches"
+
+    scope = models.CharField(max_length=64, unique=True)
+    enabled = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.scope}: {'enabled' if self.enabled else 'disabled'}"
+
+
+class AIOperationReservation(models.Model):
+    """One admission of a logical AI operation for one Account.
+
+    The reservation holds the per-request cost reserve while the operation is
+    in flight and is the ledger for started-operation rate limits. An
+    in-flight reservation remains fail-closed if its worker disappears;
+    operators can inspect it without losing the one-in-flight invariant.
+    Account deletion cascades reservations.
+    """
+
+    STATUS_IN_FLIGHT = "in_flight"
+    STATUS_COMPLETED = "completed"
+
+    class Meta:
+        verbose_name = "AI operation reservation"
+        verbose_name_plural = "AI operation reservations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account"],
+                condition=Q(status="in_flight"),
+                name="unique_ai_in_flight_per_account",
+            ),
+            models.CheckConstraint(
+                condition=Q(reserved_cost__gte=0),
+                name="ai_reservation_cost_non_negative",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["account", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    account = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ai_operation_reservations",
+    )
+    feature = models.CharField(max_length=64)
+    status = models.CharField(max_length=32, default=STATUS_IN_FLIGHT)
+    reserved_cost = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.account.email} {self.feature}: {self.status}"

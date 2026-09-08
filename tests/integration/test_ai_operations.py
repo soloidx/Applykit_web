@@ -1,11 +1,14 @@
 import decimal
 import json
+import logging
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from django.conf import settings
 from django.core.management import call_command
 from django.test import override_settings
+from django.utils import timezone
 
 from apps.accounts.models import Account
 from apps.ai import engine, operations, transport
@@ -19,9 +22,10 @@ from apps.ai.errors import (
     UNAVAILABLE,
     AIError,
 )
-from apps.ai.models import AIOperationAudit
+from apps.ai.models import AIOperationAudit, AIOperationReservation, AIOperationSwitch
 from apps.ai.schemas import JobPostingExtraction
 from apps.ai.services import accept_consent, withdraw_consent
+from tests.integration.ai_test_support import ai_overrides, enable_switches
 from tests.unit.ai_support import (
     FakeTransport,
     completion_body,
@@ -35,16 +39,6 @@ SOURCE = "Jane Doe is a Senior Engineer skilled in Node.js and Rust."
 
 def verified_candidate(email: str) -> Account:
     return Account.objects.create_user(email, "a-secure-password")
-
-
-def ai_overrides(**overrides: object) -> dict[str, object]:
-    configured: dict[str, object] = {
-        "API_KEY": "test-key",
-        "PROFILE_MODEL": "acme/profile-model",
-        "POSTING_MODEL": "acme/posting-model",
-    }
-    configured.update(overrides)
-    return configured
 
 
 class Wire:
@@ -69,6 +63,7 @@ def wire(monkeypatch: pytest.MonkeyPatch) -> Wire:
 @pytest.fixture(autouse=True)
 def enabled_ai_settings():
     with override_settings(AI_IMPORTS=ai_overrides()):
+        enable_switches()
         yield
 
 
@@ -364,3 +359,121 @@ class TestPrivacyAndLifecycle:
 
         other = verified_candidate("other@example.com")
         assert not AIOperationAudit.objects.filter(account=other).exists()
+
+
+class TestUsageBounds:
+    def test_disabled_switches_block_operations_without_any_provider_request(self, wire) -> None:
+        account = consenting_candidate("switch-blocked@example.com")
+        AIOperationSwitch.objects.all().delete()
+        fake = wire.install(completion_body(content=json.dumps(profile_payload())))
+
+        with pytest.raises(AIError) as raised:
+            operations.extract_candidate_profile(account, SOURCE)
+
+        assert raised.value.category == UNAVAILABLE
+        assert fake.call_count == 0
+        audit = AIOperationAudit.objects.get(account=account)
+        assert audit.outcome == UNAVAILABLE
+
+    def test_exhausted_rolling_window_is_audited_without_any_provider_request(self, wire) -> None:
+        account = consenting_candidate("rolling-blocked@example.com")
+        for _ in range(5):
+            AIOperationReservation.objects.create(
+                account=account,
+                feature=FEATURE_CANDIDATE_PROFILE,
+                status=AIOperationReservation.STATUS_COMPLETED,
+            )
+        fake = wire.install(completion_body(content=json.dumps(profile_payload())))
+
+        with pytest.raises(AIError) as raised:
+            operations.extract_candidate_profile(account, SOURCE)
+
+        assert raised.value.category == RATE_LIMITED
+        assert fake.call_count == 0
+        audit = AIOperationAudit.objects.get(account=account)
+        assert audit.outcome == RATE_LIMITED
+
+    def test_budget_reservation_and_reconciliation_bound_spend(self, wire) -> None:
+        account = consenting_candidate("budget@example.com")
+        AIOperationAudit.objects.create(
+            account=account,
+            feature=FEATURE_CANDIDATE_PROFILE,
+            consent_policy="test-policy",
+            outcome=AIOperationAudit.OUTCOME_SUCCESS,
+            cost=decimal.Decimal("4.50"),
+        )
+
+        wire.install(completion_body(content=json.dumps(profile_payload())))
+        operations.extract_candidate_profile(account, SOURCE)
+        assert AIOperationAudit.objects.filter(account=account).count() == 2
+        reservation = AIOperationReservation.objects.get(account=account)
+        assert reservation.status == AIOperationReservation.STATUS_COMPLETED
+
+        # The remaining ceiling can no longer cover a fresh per-request reserve.
+        fake = wire.install(completion_body(content=json.dumps(profile_payload())))
+        with pytest.raises(AIError) as raised:
+            operations.extract_candidate_profile(account, SOURCE)
+
+        assert raised.value.category == RATE_LIMITED
+        assert fake.call_count == 0
+
+    def test_older_spend_falls_out_of_the_rolling_window(self, wire) -> None:
+        account = consenting_candidate("budget-window@example.com")
+        spent = AIOperationAudit.objects.create(
+            account=account,
+            feature=FEATURE_CANDIDATE_PROFILE,
+            consent_policy="test-policy",
+            outcome=AIOperationAudit.OUTCOME_SUCCESS,
+            cost=decimal.Decimal("4.60"),
+        )
+        spent.created_at = timezone.now() - timedelta(days=45)
+        spent.save()
+
+        fake = wire.install(completion_body(content=json.dumps(profile_payload())))
+
+        operations.extract_candidate_profile(account, SOURCE)
+
+        assert fake.call_count == 1
+
+    def test_unavailable_budget_state_fails_closed(self, wire, monkeypatch) -> None:
+        account = consenting_candidate("budget-closed@example.com")
+        fake = wire.install(completion_body(content=json.dumps(profile_payload())))
+
+        def broken(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("budget state unavailable")
+
+        monkeypatch.setattr("django.db.models.query.QuerySet.aggregate", broken)
+
+        with pytest.raises(AIError) as raised:
+            operations.extract_candidate_profile(account, SOURCE)
+
+        assert raised.value.category == INTERNAL_ERROR
+        assert fake.call_count == 0
+        audit = AIOperationAudit.objects.get(account=account)
+        assert audit.outcome == INTERNAL_ERROR
+
+    def test_operation_telemetry_is_content_free(self, wire, caplog) -> None:
+        account = consenting_candidate("telemetry@example.com")
+        secret = "CONFIDENTIAL-project-Nova-details"
+        wire.install(completion_body(content=json.dumps(profile_payload())))
+
+        with caplog.at_level(logging.INFO):
+            operations.extract_candidate_profile(account, f"{SOURCE} {secret}")
+
+        assert secret not in caplog.text
+        assert SOURCE not in caplog.text
+        records = [
+            record
+            for record in caplog.records
+            if record.name in ("applykit.ai", "applykit.security")
+        ]
+        completed = [r for r in records if r.event == "ai_operation_completed"]
+        assert len(completed) == 1
+        record = completed[0]
+        assert record.account_id == account.pk
+        assert record.feature == FEATURE_CANDIDATE_PROFILE
+        assert record.outcome == AIOperationAudit.OUTCOME_SUCCESS
+        assert record.attempts == 1
+        assert record.duration_ms >= 0
+        assert record.prompt_tokens == 100
+        assert record.completion_tokens == 50

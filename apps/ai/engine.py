@@ -47,6 +47,7 @@ class EngineOutcome[T]:
     category: str | None
     extraction: T | None
     usage: Usage
+    attempts: int
 
 
 def run_extraction[T](
@@ -57,13 +58,15 @@ def run_extraction[T](
 ) -> EngineOutcome[T]:
     client = _client_for(config)
     usage = Usage.zero()
+    attempts = 0
     deadline = _monotonic() + config.deadline_seconds
 
     for attempt in range(config.max_attempts):
         remaining = deadline - _monotonic()
         if remaining <= 0:
-            return EngineOutcome(False, TIMEOUT, None, usage)
+            return EngineOutcome(False, TIMEOUT, None, usage, attempts)
 
+        attempts += 1
         result = _send(client, payload, remaining)
         outcome: EngineOutcome[T] | None = None
         if isinstance(result, transport.TransportFailure):
@@ -71,26 +74,26 @@ def run_extraction[T](
         else:
             failure = transport.classify_response(result)
             if failure is None:
-                failure, usage, outcome = _evaluate(result, validate, usage)
+                failure, usage, outcome = _evaluate(result, validate, usage, attempts)
         if outcome is not None:
             return outcome
 
         assert failure is not None
         if not failure.retryable:
-            return EngineOutcome(False, failure.category, None, usage)
+            return EngineOutcome(False, failure.category, None, usage, attempts)
         if attempt + 1 >= config.max_attempts:
-            return EngineOutcome(False, failure.category, None, usage)
+            return EngineOutcome(False, failure.category, None, usage, attempts)
         remaining = deadline - _monotonic()
         if remaining <= 0:
             continue
         if failure.retry_after is not None and failure.retry_after >= remaining:
             # The provider asked for more time than the total deadline has
             # left; a bounded sleep could not produce another attempt.
-            return EngineOutcome(False, failure.category, None, usage)
+            return EngineOutcome(False, failure.category, None, usage, attempts)
         delay = failure.retry_after if failure.retry_after is not None else _RETRY_DELAY_SECONDS
         _sleep(min(delay, remaining))
 
-    return EngineOutcome(False, TIMEOUT, None, usage)
+    return EngineOutcome(False, TIMEOUT, None, usage, attempts)
 
 
 def _send(
@@ -113,7 +116,10 @@ def _send(
 
 
 def _evaluate[T](
-    result: transport.TransportResult, validate: Callable[[Any], T], usage: Usage
+    result: transport.TransportResult,
+    validate: Callable[[Any], T],
+    usage: Usage,
+    attempts: int,
 ) -> tuple[transport.TransportFailure | None, Usage, EngineOutcome[T] | None]:
     """Interpret and locally validate one response.
 
@@ -133,14 +139,26 @@ def _evaluate[T](
         decoded = json.loads(completion.content)
     except ValueError:
         # Malformed JSON is not schema-invalid output and is never retried.
-        return transport.TransportFailure(INVALID_RESPONSE, retryable=False), usage, None
+        return (
+            transport.TransportFailure(INVALID_RESPONSE, retryable=False),
+            usage,
+            None,
+        )
     try:
         extraction = validate(decoded)
     except ResultRejected:
-        return transport.TransportFailure(INVALID_RESPONSE, retryable=True), usage, None
+        return (
+            transport.TransportFailure(INVALID_RESPONSE, retryable=True),
+            usage,
+            None,
+        )
     except Exception:
-        return transport.TransportFailure(INTERNAL_ERROR, retryable=False), usage, None
-    return None, usage, EngineOutcome(True, None, extraction, usage)
+        return (
+            transport.TransportFailure(INTERNAL_ERROR, retryable=False),
+            usage,
+            None,
+        )
+    return None, usage, EngineOutcome(True, None, extraction, usage, attempts)
 
 
 def _aggregate(usage: Usage, completion: transport.Completion) -> Usage:

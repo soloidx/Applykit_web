@@ -135,10 +135,10 @@ DOCUMENT_EXTRACTION = {
 AI_CONSENT = {"POLICY": env("AI_CONSENT_POLICY", default="2026-09-initial-ai-imports")}
 
 # AI import operations. One qualified model per task, the provider endpoint
-# and credential, the total deadline, attempt bound, token bounds, and the
-# per-request price ceiling. An empty credential or model disables the
-# feature and every operation fails closed; callers cannot override these
-# values. The per-request price ceiling is in dollars.
+# and credential, the total deadline, attempt bound, token bounds, per-request
+# price ceiling, and rolling-30-day Account cost ceiling. An empty credential
+# or model disables the feature and every operation fails closed; callers
+# cannot override these values. Prices and ceilings are in dollars.
 AI_IMPORTS = {
     "BASE_URL": env("AI_IMPORTS_BASE_URL", default="https://openrouter.ai/api/v1"),
     "API_KEY": env("AI_IMPORTS_API_KEY", default=""),
@@ -146,7 +146,8 @@ AI_IMPORTS = {
     "MAX_ATTEMPTS": 2,
     "MAX_INPUT_TOKENS": 60_000,
     "MAX_OUTPUT_TOKENS": 8_000,
-    "PRICE_CEILING": 0.50,
+    "PRICE_CEILING": env("AI_IMPORTS_PRICE_CEILING", default=0.50),
+    "ACCOUNT_COST_CEILING": env("AI_IMPORTS_ACCOUNT_COST_CEILING", default=5.00),
     "PROFILE_MODEL": env("AI_IMPORTS_PROFILE_MODEL", default=""),
     "POSTING_MODEL": env("AI_IMPORTS_POSTING_MODEL", default=""),
 }

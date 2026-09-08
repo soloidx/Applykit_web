@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from apps.ai.models import AIOperationAudit, ConsentPreference
+from apps.ai.models import (
+    AIOperationAudit,
+    AIOperationReservation,
+    AIOperationSwitch,
+    ConsentPreference,
+)
 
 
 @admin.register(ConsentPreference)
@@ -27,3 +32,40 @@ class AIOperationAuditAdmin(admin.ModelAdmin):
         "cost",
         "created_at",
     )
+
+
+@admin.register(AIOperationSwitch)
+class AIOperationSwitchAdmin(admin.ModelAdmin):
+    # Operator-controlled fail-closed switches; absent rows mean disabled.
+    list_display = ("scope", "enabled", "updated_at")
+    list_filter = ("enabled",)
+    fields = ("scope", "enabled")
+
+
+@admin.register(AIOperationReservation)
+class AIOperationReservationAdmin(admin.ModelAdmin):
+    # Content-free admission ledger; read-only for operators.
+    list_display = (
+        "account",
+        "feature",
+        "status",
+        "reserved_cost",
+        "created_at",
+    )
+    list_filter = ("feature", "status")
+    readonly_fields = (
+        "account",
+        "feature",
+        "status",
+        "reserved_cost",
+        "created_at",
+    )
+
+    def has_add_permission(self, *args: object, **kwargs: object) -> bool:
+        return False
+
+    def has_change_permission(self, *args: object, **kwargs: object) -> bool:
+        return False
+
+    def has_delete_permission(self, *args: object, **kwargs: object) -> bool:
+        return False
