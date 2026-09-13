@@ -32,7 +32,11 @@ from apps.ai.models import AIOperationAudit
 from apps.ai.services import has_current_consent
 from apps.documents.canonicalization import TextOverBudget, canonicalize
 
-__all__ = ["extract_candidate_profile", "extract_job_posting"]
+__all__ = [
+    "assert_candidate_profile_import_preconditions",
+    "extract_candidate_profile",
+    "extract_job_posting",
+]
 
 T = TypeVar("T")
 
@@ -77,6 +81,24 @@ class _InvalidInput(Exception):
 
 def extract_candidate_profile(account: Account, text: str) -> schemas.CandidateProfileExtraction:
     return _extract(account, text, _PROFILE_SPEC)
+
+
+def assert_candidate_profile_import_preconditions(account: Account) -> None:
+    """Gate the Candidate Profile upload route before any source is read.
+
+    Rechecks consent, feature configuration, and admission availability without
+    reserving. The authoritative consent recheck, reservation, and audit still
+    happen inside :func:`extract_candidate_profile` immediately before
+    transmission. Raises :class:`AIError` with a fixed safe category.
+    """
+
+    try:
+        config = conf.feature_config(conf.FEATURE_CANDIDATE_PROFILE)
+    except conf.ConfigurationError:
+        raise AIError(CONFIGURATION_ERROR) from None
+    if not has_current_consent(account):
+        raise AIError(CONSENT_REQUIRED)
+    admission.check_admissible(account, config)
 
 
 def extract_job_posting(account: Account, text: str) -> schemas.JobPostingExtraction:

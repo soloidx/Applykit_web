@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 from zoneinfo import available_timezones
 
@@ -33,6 +34,7 @@ class CandidateProfile(models.Model):
     location = models.CharField(max_length=200, blank=True)
     linkedin_url = models.URLField(blank=True)
     portfolio_url = models.URLField(blank=True)
+    revision = models.UUIDField(default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -45,6 +47,10 @@ class CandidateProfile(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding and not self.contact_email:
             self.contact_email = self.account.email
+        if not self._state.adding:
+            # Every mutation of the aggregate root advances its revision. Eventual
+            # owned-record mutations advance it through the profile services.
+            self.revision = uuid.uuid4()
         super().save(*args, **kwargs)
 
     @property

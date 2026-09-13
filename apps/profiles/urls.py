@@ -1,5 +1,6 @@
 from django.urls import path
 
+from apps.profiles.import_views import profile_import_process, profile_import_save
 from apps.profiles.views import (
     education_create,
     education_delete,
@@ -35,6 +36,16 @@ from apps.profiles.views import (
 
 urlpatterns = [
     path("profile/", profile, name="profile"),
+    path(
+        "profile/import/",
+        profile_import_process,
+        name="profile_import_process",
+    ),
+    path(
+        "profile/import/save/",
+        profile_import_save,
+        name="profile_import_save",
+    ),
     path("profile/experience/new/", experience_create, name="experience_create"),
     path(
         "profile/experience/<int:experience_id>/edit/",

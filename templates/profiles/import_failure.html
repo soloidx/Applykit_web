@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Import stopped safely | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-3xl px-6 py-12 sm:py-20">
+  <ol class="grid grid-cols-4 overflow-hidden rounded-2xl border border-ink/10 bg-cream text-xs font-semibold sm:text-sm">
+    <li class="p-3 text-ink/50 sm:p-4"><span class="block text-coral">01</span>Source</li>
+    <li class="border-l border-ink/10 bg-coral/5 p-3 sm:p-4" aria-current="step"><span class="block text-coral">02</span>Process</li>
+    <li class="border-l border-ink/10 p-3 text-ink/50 sm:p-4"><span class="block text-coral">03</span>Review</li>
+    <li class="border-l border-ink/10 p-3 text-ink/50 sm:p-4"><span class="block text-coral">04</span>Save</li>
+  </ol>
+
+  <div class="mt-8 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+    <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Import stopped safely</p>
+    <h1 class="mt-3 font-display text-4xl font-semibold tracking-tight sm:text-5xl">We could not read this source.</h1>
+    <p class="mt-5 leading-7 text-ink/70">{{ message }}</p>
+    <p class="mt-4 leading-7 text-ink/70">Your saved data is unchanged. You can try a supported document again, or enter your details manually.</p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a class="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-sand transition hover:bg-coral" href="{% url 'profile' %}">Try another document</a>
+      <a class="rounded-full border border-ink/15 px-6 py-3 text-sm font-semibold text-ink transition hover:border-coral hover:text-coral" href="{% url 'profile' %}#profile-form">Enter details manually</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Review your imported profile | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-5xl px-6 py-12 sm:py-20">
+  <ol class="grid grid-cols-4 overflow-hidden rounded-2xl border border-ink/10 bg-cream text-xs font-semibold sm:text-sm">
+    <li class="p-3 text-ink/50 sm:p-4"><span class="block text-coral">01</span>Source</li>
+    <li class="border-l border-ink/10 p-3 text-ink/50 sm:p-4"><span class="block text-coral">02</span>Process</li>
+    <li class="border-l border-ink/10 bg-sand p-3 sm:p-4" aria-current="step"><span class="block text-coral">03</span>Review</li>
+    <li class="border-l border-ink/10 p-3 text-ink/50 sm:p-4"><span class="block text-coral">04</span>Save</li>
+  </ol>
+
+  <div class="mt-8 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+    <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Private browser draft</p>
+    <h1 class="mt-3 font-display text-4xl font-semibold tracking-tight sm:text-5xl">Check every source fact.</h1>
+    <p class="mt-5 max-w-3xl leading-7 text-ink/70">ApplyKit proposed only facts your document states. Fields your document did not state are left blank. Edit anything you need, confirm your full name, and choose your timezone.</p>
+
+    <p class="mt-6 rounded-2xl border border-coral/30 bg-coral/5 px-4 py-3 text-sm text-ink" role="status">This draft lives only in this browser and has not been saved. Refreshing, going back, or leaving this page discards it.</p>
+
+    {% if stale %}
+    <p class="mt-6 rounded-2xl border border-coral/40 bg-coral/10 px-4 py-3 text-sm font-semibold text-ink" role="alert">Your profile changed since this import was processed, so nothing was saved and no existing data was replaced. Start a new import to review the latest state.</p>
+    {% endif %}
+
+    <form class="mt-8 space-y-8" method="post" action="{% url 'profile_import_save' %}">
+      {% csrf_token %}
+      {{ form.version_token }}
+      {% if form.non_field_errors %}
+      <div class="rounded-2xl bg-coral/10 px-4 py-3 text-sm text-coral" role="alert">{{ form.non_field_errors }}</div>
+      {% endif %}
+      <div class="grid gap-6 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="text-sm font-semibold text-ink" for="{{ form.full_name.id_for_label }}">Full name <span class="text-coral">*</span></label>
+          {{ form.full_name }}
+          {% if not form.full_name.value %}<p class="mt-2 text-sm text-ink/50">Not stated in your document. Enter it if it should appear.</p>{% endif %}
+          {% for error in form.full_name.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+          <label class="mt-3 flex items-center gap-3 text-sm font-semibold text-ink" for="{{ form.confirm_full_name.id_for_label }}">
+            {{ form.confirm_full_name }}
+            <span>I confirm this is my full name</span>
+          </label>
+          {% for error in form.confirm_full_name.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+        </div>
+        {% for field in form %}
+        {% if field.name != 'full_name' and field.name != 'confirm_full_name' and field.name != 'version_token' %}
+        <div class="{% if field.name == 'professional_summary' %}sm:col-span-2{% endif %}">
+          <label class="text-sm font-semibold text-ink" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-coral">*</span>{% endif %}</label>
+          {{ field }}
+          {% if field.name in ai_fields and not field.value %}<p class="mt-2 text-sm text-ink/50">Not stated in your document. Add it if it should appear.</p>{% endif %}
+          {% if field.help_text %}<p class="mt-2 text-sm leading-6 text-ink/55">{{ field.help_text }}</p>{% endif %}
+          {% for error in field.errors %}<p class="mt-2 text-sm text-coral" role="alert">{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <button class="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Save profile</button>
+        <a class="text-sm font-semibold text-ink/60 hover:text-coral" href="{% url 'profile' %}">Discard draft</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

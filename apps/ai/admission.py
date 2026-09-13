@@ -27,7 +27,7 @@ from apps.ai.conf import FeatureConfig
 from apps.ai.errors import INTERNAL_ERROR, RATE_LIMITED, UNAVAILABLE, AIError
 from apps.ai.models import AIOperationAudit, AIOperationReservation, AIOperationSwitch
 
-__all__ = ["Reservation", "admit", "reconcile", "switches_enabled"]
+__all__ = ["Reservation", "admit", "check_admissible", "reconcile", "switches_enabled"]
 
 MAX_STARTED_15_MINUTES = 5
 MAX_STARTED_24_HOURS = 20
@@ -74,6 +74,38 @@ def admit(account: Account, config: FeatureConfig) -> Reservation:
     return reservation
 
 
+def check_admissible(account: Account, config: FeatureConfig) -> None:
+    """Read-only admission check for callers that must gate before reading a source.
+
+    It never reserves: the authoritative reservation still happens in
+    :func:`admit` at the AI boundary. It fails closed with the same fixed safe
+    categories as admission.
+    """
+
+    try:
+        _assert_admissible(account, config, timezone.now())
+    except AIError:
+        raise
+    except Exception:
+        raise AIError(INTERNAL_ERROR) from None
+
+
+def _assert_admissible(account: Account, config: FeatureConfig, now: datetime) -> None:
+    if not switches_enabled(config.feature):
+        raise AIError(UNAVAILABLE)
+    if AIOperationReservation.objects.filter(
+        account=account,
+        status=AIOperationReservation.STATUS_IN_FLIGHT,
+    ).exists():
+        raise AIError(RATE_LIMITED)
+    if _count_started(account, now - timedelta(minutes=15)) >= MAX_STARTED_15_MINUTES:
+        raise AIError(RATE_LIMITED)
+    if _count_started(account, now - timedelta(hours=24)) >= MAX_STARTED_24_HOURS:
+        raise AIError(RATE_LIMITED)
+    if _budget_spent(account, now) + config.price_ceiling > config.account_cost_ceiling:
+        raise AIError(RATE_LIMITED)
+
+
 def reconcile(reservation: Reservation) -> None:
     """Release the in-flight hold after the operation's audit is recorded.
 
@@ -102,17 +134,7 @@ def _admit(account: Account, config: FeatureConfig) -> Reservation:
     try:
         with transaction.atomic():
             Account.objects.select_for_update().get(pk=account.pk)
-            if not switches_enabled(config.feature):
-                raise AIError(UNAVAILABLE)
-            started_15m = _count_started(account, now - timedelta(minutes=15))
-            started_24h = _count_started(account, now - timedelta(hours=24))
-            spent = _budget_spent(account, now)
-
-            if started_15m >= MAX_STARTED_15_MINUTES or started_24h >= MAX_STARTED_24_HOURS:
-                raise AIError(RATE_LIMITED)
-            if spent + config.price_ceiling > config.account_cost_ceiling:
-                raise AIError(RATE_LIMITED)
-
+            _assert_admissible(account, config, now)
             try:
                 with transaction.atomic():
                     row = AIOperationReservation.objects.create(
