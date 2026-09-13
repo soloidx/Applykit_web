@@ -32,4 +32,4 @@ def test_profile_contact_email_migration_backfills_existing_profiles() -> None:
         assert profile.contact_email == "historical@example.com"
     finally:
         executor = MigrationExecutor(connection)
-        executor.migrate(new_migration)
+        executor.migrate(executor.loader.graph.leaf_nodes())

@@ -1,6 +1,7 @@
 import pytest
 from allauth.account.models import EmailAddress
 from django.apps import apps
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.loader import MigrationLoader
 from django.db.models.deletion import ProtectedError
@@ -369,8 +370,10 @@ def test_source_rows_cascade_and_shared_skill_concepts_are_protected() -> None:
     sources["experience_skill"].delete()
     sources["project_skill"].delete()
 
-    with pytest.raises(ProtectedError):
+    with pytest.raises(ValidationError):
         sources["concept"].delete()
+    with pytest.raises(ProtectedError):
+        SkillConcept.objects.filter(pk=sources["concept"].pk).delete()
 
     assert ResumeSkill.objects.filter(pk=resume_skill.pk).exists()
 

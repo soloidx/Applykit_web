@@ -122,4 +122,4 @@ def test_profile_skill_migration_preserves_private_rows_and_reuses_catalog_conce
         assert CatalogConcept.objects.filter(canonical_key__in=["python", "ｐython"]).count() == 2
     finally:
         executor = MigrationExecutor(connection)
-        executor.migrate(current_head)
+        executor.migrate(executor.loader.graph.leaf_nodes())

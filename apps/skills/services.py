@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from time import sleep
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db.models import Count, QuerySet
 
 from apps.skills.models import (
     SkillAlias,
@@ -230,6 +231,29 @@ def rename_skill_alias(*, alias: SkillAlias, display_name: str) -> SkillAlias:
     raise RuntimeError("Skill alias rewording did not complete.")
 
 
+@transaction.atomic
+def delete_skill_alias(*, alias: SkillAlias) -> None:
+    """Delete one unreferenced noncanonical alias through the domain path.
+
+    Canonical aliases cannot be deleted independently: the concept owns that
+    wording. An alias referenced by any Application Skill Requirement is
+    database-protected and cannot be removed. Only a noncanonical alias with no
+    references may be hard-deleted.
+    """
+
+    from apps.applications.models import ApplicationSkillRequirement
+
+    locked = SkillAlias.objects.select_for_update().get(pk=alias.pk)
+    if locked.is_canonical:
+        raise ValidationError(
+            "Canonical skill aliases cannot be deleted; rename the concept instead."
+        )
+    if ApplicationSkillRequirement.objects.filter(alias=locked).exists():
+        raise ValidationError("This skill alias is referenced and cannot be deleted.")
+    with catalog_operation():
+        locked.delete()
+
+
 def skill_catalog_issues() -> tuple[str, ...]:
     """Detect catalog drift that direct mutations can produce outside the domain operations."""
     issues: list[str] = []
@@ -269,7 +293,95 @@ def skill_catalog_issues() -> tuple[str, ...]:
                 "canonical key of another skill concept."
             )
 
+    issues.extend(_dangling_reference_issues())
+    issues.extend(_duplicate_effective_concept_issues())
     return tuple(issues)
+
+
+def _dangling_reference_issues() -> list[str]:
+    """Private and alias rows must resolve to an existing catalog record."""
+
+    from apps.applications.models import ApplicationSkillRequirement
+    from apps.profiles.models import ExperienceSkill, ProfileSkill, ProjectSkill
+
+    concept_ids = SkillConcept.objects.values("id")
+    alias_ids = SkillAlias.objects.values("id")
+    locations = (
+        ("skill alias", SkillAlias.objects.exclude(concept_id__in=concept_ids)),
+        ("profile skill", ProfileSkill.objects.exclude(concept_id__in=concept_ids)),
+        ("experience skill", ExperienceSkill.objects.exclude(concept_id__in=concept_ids)),
+        ("project skill", ProjectSkill.objects.exclude(concept_id__in=concept_ids)),
+        (
+            "application skill requirement",
+            ApplicationSkillRequirement.objects.exclude(alias_id__in=alias_ids),
+        ),
+    )
+
+    issues: list[str] = []
+    for label, queryset in locations:
+        dangling = queryset.count()
+        if dangling:
+            issues.append(f"{dangling} {label}(s) reference a missing catalog record.")
+    return issues
+
+
+def _duplicate_effective_concept_issues() -> list[str]:
+    """Each private location may reference an effective concept only once."""
+
+    from apps.applications.models import ApplicationSkillRequirement
+    from apps.profiles.models import ExperienceSkill, ProfileSkill, ProjectSkill
+
+    issues: list[str] = []
+    issues.extend(
+        _repeated_concept_issues(
+            ApplicationSkillRequirement.objects.values("application_id", "alias__concept_id"),
+            label="Application",
+            owner_field="application_id",
+            concept_field="alias__concept_id",
+        )
+    )
+    issues.extend(
+        _repeated_concept_issues(
+            ProfileSkill.objects.values("profile_id", "concept_id"),
+            label="Profile",
+            owner_field="profile_id",
+            concept_field="concept_id",
+        )
+    )
+    issues.extend(
+        _repeated_concept_issues(
+            ExperienceSkill.objects.values("experience_id", "concept_id"),
+            label="Experience",
+            owner_field="experience_id",
+            concept_field="concept_id",
+        )
+    )
+    issues.extend(
+        _repeated_concept_issues(
+            ProjectSkill.objects.values("project_id", "concept_id"),
+            label="Project",
+            owner_field="project_id",
+            concept_field="concept_id",
+        )
+    )
+    return issues
+
+
+def _repeated_concept_issues(
+    rows: QuerySet[Any, Any],
+    *,
+    label: str,
+    owner_field: str,
+    concept_field: str,
+) -> list[str]:
+    issues: list[str] = []
+    duplicates = rows.annotate(total=Count("id")).filter(total__gt=1)
+    for row in duplicates:
+        issues.append(
+            f"{label} {row[owner_field]} repeats skill concept {row[concept_field]} "
+            f"{row['total']} times."
+        )
+    return issues
 
 
 @transaction.atomic

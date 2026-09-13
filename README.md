@@ -17,6 +17,23 @@ uv run python manage.py runserver
 
 Open `http://127.0.0.1:8000/`. Authentication email is printed to the console during development.
 
+#### Recreating a development database
+
+ADR-0009 replaced private skill wording with catalog-owned Skill Concepts and Aliases. That transition is a destructive pre-production schema change with no in-place upgrade path, so a development database created before it cannot be migrated. Drop it and recreate it:
+
+```sh
+rm db.sqlite3
+uv run python manage.py migrate
+```
+
+Docker development databases are held in the `db` volume. Recreate that volume too:
+
+```sh
+docker compose down --volumes
+docker compose up --build -d db
+docker compose run --rm web uv run python manage.py migrate
+```
+
 Run the quality checks with:
 
 ```sh

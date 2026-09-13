@@ -74,6 +74,11 @@ class SkillConcept(models.Model):
                 canonical_alias.display_name = self.canonical_name
                 canonical_alias.save(update_fields=["display_name", "normalized_value"])
 
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if not _catalog_operation.get():
+            raise ValidationError("Delete a skill concept through the skills-domain operation.")
+        return super().delete(*args, **kwargs)
+
 
 class SkillAlias(models.Model):
     concept = models.ForeignKey(
@@ -128,3 +133,8 @@ class SkillAlias(models.Model):
                     )
         self.normalized_value = normalized_value
         super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        if not _catalog_operation.get():
+            raise ValidationError("Delete a skill alias through the skills-domain operation.")
+        return super().delete(*args, **kwargs)
