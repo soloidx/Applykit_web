@@ -9,6 +9,7 @@ from apps.ai.errors import INTERNAL_ERROR, INVALID_RESPONSE, AIError
 from apps.ai.models import AIOperationReservation, AIOperationSwitch
 from apps.ai.schemas import JobPostingExtraction
 from apps.ai.services import accept_consent
+from apps.applications.imports import InvalidApplicationContents, create_imported_application
 from apps.applications.models import Company, JobApplication
 from apps.campaigns.models import Campaign
 from tests.integration.ai_test_support import ai_overrides, enable_switches
@@ -80,13 +81,32 @@ def process(client: Client, posting_text: str = "Platform engineer. Build it."):
 
 def reviewed_values(**overrides: str) -> dict[str, str]:
     values = {
+        "company_name": "Example Careers",
+        "company_website": "",
         "role_title": "Platform engineer",
         "job_description": "Build dependable internal systems.",
         "location": "Remote",
         "compensation": "100000 GBP",
+        "posting_url": "",
+        "creation_token": "test-creation-token",
     }
     values.update(overrides)
     return values
+
+
+def make_application(account: Account, **overrides: object) -> JobApplication:
+    company = Company.objects.create(name="Existing Co")
+    campaign = Campaign.objects.get(account=account)
+    values: dict[str, object] = {
+        "account": account,
+        "campaign": campaign,
+        "company": company,
+        "role_title": "Existing role",
+        "job_description": "Existing description.",
+        "posting_url": "",
+    }
+    values.update(overrides)
+    return JobApplication.objects.create(**values)  # type: ignore[arg-type]
 
 
 class TestSourceStep:
@@ -216,9 +236,12 @@ class TestReviewDraft:
         assert response.headers["Cache-Control"] == "no-store"
         content = response.content.decode()
         assert "Check every stated fact" in content
-        assert 'name="company"' in content
+        assert 'name="company_name"' in content
+        assert 'name="company_website"' in content
         assert 'name="role_title"' in content
         assert 'name="job_description"' in content
+        assert 'name="posting_url"' in content
+        assert 'name="creation_token"' in content
         assert "browser" in content.lower()
         assert 'name="source"' not in content
         assert 'name="private_notes"' not in content
@@ -303,17 +326,164 @@ class TestReviewDraft:
         assert f'href="{reverse("application_create")}"' in content
 
 
+class TestCompanyIdentityReview:
+    def test_stated_website_matching_an_existing_company_is_reused(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("reuse@example.com")
+        existing = Company.objects.create(name="Example", canonical_domain="example.com")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [posting_extraction(company_website="https://www.example.com/careers")]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "shared Company" in content
+        assert existing.name in content
+        assert "no new Company identity is created" in content
+
+    def test_domain_alias_matching_an_existing_company_is_reused(self, fake_ai: FakeAI) -> None:
+        from apps.applications.models import CompanyDomainAlias
+
+        account = verified_candidate("alias@example.com")
+        existing = Company.objects.create(name="Example", canonical_domain="example.com")
+        CompanyDomainAlias.objects.create(company=existing, domain="example.co.uk")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [posting_extraction(company_website="jobs.example.co.uk")]
+
+        response = process(client)
+
+        assert response.status_code == 200
+        assert existing.name in response.content.decode()
+
+    def test_name_only_provisional_company_shows_the_shared_identity_disclosure(
+        self, fake_ai: FakeAI
+    ) -> None:
+        account = verified_candidate("provisional@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "shared public Company" in content
+        assert "not private to your account" in content
+
+    def test_extraction_never_derives_a_website_from_the_posting_host(
+        self, fake_ai: FakeAI
+    ) -> None:
+        account = verified_candidate("no-derive@example.com")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [
+            posting_extraction(
+                company_name="Example",
+                company_website=None,
+                posting_url="https://jobs.example.com/roles/1",
+            )
+        ]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert 'name="company_website"' in content
+        assert "shared public Company" in content
+
+
+class TestProvenanceReview:
+    def test_extracted_url_is_sanitized_before_review(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("sanitize@example.com")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [
+            posting_extraction(posting_url="https://example.com/jobs/1?utm_source=x&id=7#apply")
+        ]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "https://example.com/jobs/1?id=7" in content
+        assert "utm_source" not in content
+        assert "#apply" not in content
+
+    def test_malformed_extracted_url_is_removed_with_a_warning(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("malformed-extracted@example.com")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [posting_extraction(posting_url="https://[::1")]
+
+        response = process(client)
+
+        assert response.status_code == 200
+        assert "looked unsafe" in response.content.decode()
+
+    def test_unsafe_extracted_url_is_removed_with_a_warning(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("unsafe-extracted@example.com")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [
+            posting_extraction(posting_url="https://example.com/jobs/1?access_token=secret")
+        ]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "looked unsafe" in content
+        assert "access_token" not in content
+
+    def test_duplicate_warning_lists_company_role_campaign_and_stage(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("duplicate@example.com")
+        existing = make_application(
+            account,
+            posting_url="https://example.com/jobs/1",
+            role_title="Existing role",
+        )
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [posting_extraction(posting_url="https://example.com/jobs/1")]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "matches an application you already have" in content
+        assert existing.company.name in content
+        assert "Existing role" in content
+        assert f"Campaign #{existing.campaign_id}" in content
+        assert existing.get_stage_display() in content
+
+    def test_duplicate_warning_is_account_private(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("owner@example.com")
+        other = verified_candidate("other@example.com", consent=False)
+        make_application(other, posting_url="https://example.com/jobs/1")
+        client = Client()
+        client.force_login(account)
+        fake_ai.results = [posting_extraction(posting_url="https://example.com/jobs/1")]
+
+        response = process(client)
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "matches an application you already have" not in content
+
+
 class TestAtomicSave:
-    def test_save_creates_one_draft_application_atomically(self, fake_ai: FakeAI) -> None:
+    def test_save_creates_one_draft_application_and_its_company_atomically(
+        self, fake_ai: FakeAI
+    ) -> None:
         account = verified_candidate("save@example.com")
-        company = Company.objects.create(name="Example Careers")
         campaign = Campaign.objects.get(account=account)
         client = Client()
         client.force_login(account)
 
         response = client.post(
             reverse("application_import_save"),
-            reviewed_values(company=str(company.pk)),
+            reviewed_values(),
         )
 
         assert response.status_code == 302
@@ -321,12 +491,91 @@ class TestAtomicSave:
         assert response.headers["Location"] == reverse("application_detail", args=[application.pk])
         assert application.account == account
         assert application.campaign == campaign
-        assert application.company == company
+        assert application.company.name == "Example Careers"
+        assert application.company.canonical_domain is None
         assert application.stage == JobApplication.Stage.DRAFT
         assert application.role_title == "Platform engineer"
         assert application.location == "Remote"
         assert application.source == ""
         assert application.private_notes == ""
+
+    def test_save_reuses_an_existing_company_on_a_domain_match(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("reuse-save@example.com")
+        existing = Company.objects.create(name="Example", canonical_domain="example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = client.post(
+            reverse("application_import_save"),
+            reviewed_values(company_website="https://www.example.com/careers"),
+        )
+
+        assert response.status_code == 302
+        application = JobApplication.objects.get()
+        assert application.company == existing
+        assert Company.objects.count() == 1
+
+    def test_save_persists_the_reviewed_sanitized_url(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("provenance@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = client.post(
+            reverse("application_import_save"),
+            reviewed_values(posting_url="https://example.com/jobs/1?utm_source=x&id=7#apply"),
+        )
+
+        assert response.status_code == 302
+        application = JobApplication.objects.get()
+        assert application.posting_url == "https://example.com/jobs/1?id=7"
+
+    def test_save_rejects_an_unsafe_url_and_creates_nothing(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("unsafe-save@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = client.post(
+            reverse("application_import_save"),
+            reviewed_values(posting_url="https://user:secret@example.com/jobs/1"),
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "safe HTTP(S) posting URL" in response.content.decode()
+        assert not JobApplication.objects.filter(account=account).exists()
+        assert not Company.objects.filter(name="Example Careers").exists()
+
+    def test_save_rejects_a_malformed_url_and_creates_nothing(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("malformed-save@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = client.post(
+            reverse("application_import_save"),
+            reviewed_values(posting_url="https://[::1"),
+        )
+
+        assert response.status_code == 200
+        assert "safe HTTP(S) posting URL" in response.content.decode()
+        assert not JobApplication.objects.filter(account=account).exists()
+
+    def test_save_creates_a_company_with_a_stated_unmatched_website(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("unmatched-website@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = client.post(
+            reverse("application_import_save"),
+            reviewed_values(
+                company_name="Brand New Co",
+                company_website="https://careers.brandnewco.com/roles",
+            ),
+        )
+
+        assert response.status_code == 302
+        company = JobApplication.objects.get().company
+        assert company.name == "Brand New Co"
+        assert company.canonical_domain == "brandnewco.com"
 
     def test_save_requires_company_role_title_and_description(self, fake_ai: FakeAI) -> None:
         account = verified_candidate("required@example.com")
@@ -335,7 +584,7 @@ class TestAtomicSave:
 
         response = client.post(
             reverse("application_import_save"),
-            reviewed_values(company="", role_title="", job_description=""),
+            reviewed_values(company_name="", role_title="", job_description=""),
         )
 
         assert response.status_code == 200
@@ -345,25 +594,21 @@ class TestAtomicSave:
 
     def test_save_without_an_active_campaign_creates_nothing(self, fake_ai: FakeAI) -> None:
         account = verified_candidate("archive@example.com")
-        company = Company.objects.create(name="Example Careers")
         Campaign.objects.filter(account=account).update(status=Campaign.Status.ARCHIVED)
         client = Client()
         client.force_login(account)
 
-        response = client.post(
-            reverse("application_import_save"),
-            reviewed_values(company=str(company.pk)),
-        )
+        response = client.post(reverse("application_import_save"), reviewed_values())
 
         assert response.status_code == 200
         assert "activate a campaign" in response.content.decode().lower()
         assert not JobApplication.objects.filter(account=account).exists()
+        assert not Company.objects.filter(name="Example Careers").exists()
 
     def test_persistence_failure_creates_nothing_and_redisplays(
         self, fake_ai: FakeAI, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         account = verified_candidate("persist@example.com")
-        company = Company.objects.create(name="Example Careers")
         client = Client()
         client.force_login(account)
 
@@ -372,31 +617,83 @@ class TestAtomicSave:
 
         monkeypatch.setattr(JobApplication, "save", fail_save)
 
-        response = client.post(
-            reverse("application_import_save"),
-            reviewed_values(company=str(company.pk)),
-        )
+        response = client.post(reverse("application_import_save"), reviewed_values())
 
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
         assert "nothing was created" in response.content.decode().lower()
         assert b"Platform engineer" in response.content
         assert not JobApplication.objects.filter(account=account).exists()
+        assert not Company.objects.filter(name="Example Careers").exists()
 
     def test_save_is_scoped_to_the_authenticated_account(self, fake_ai: FakeAI) -> None:
-        account = verified_candidate("owner@example.com")
-        other = verified_candidate("other@example.com", consent=False)
-        company = Company.objects.create(name="Example Careers")
+        account = verified_candidate("scoped@example.com")
+        other = verified_candidate("other-scoped@example.com", consent=False)
+        client = Client()
+        client.force_login(account)
+
+        client.post(reverse("application_import_save"), reviewed_values())
+
+        assert JobApplication.objects.filter(account=account).count() == 1
+        assert not JobApplication.objects.filter(account=other).exists()
+
+
+class TestCreationTokenIdempotency:
+    def test_repeated_submission_returns_the_original_result(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("idempotent@example.com")
+        client = Client()
+        client.force_login(account)
+        values = reviewed_values(creation_token="one-review-token")
+
+        first = client.post(reverse("application_import_save"), values)
+        second = client.post(reverse("application_import_save"), values)
+
+        assert first.headers["Location"] == second.headers["Location"]
+        assert JobApplication.objects.filter(account=account).count() == 1
+
+    def test_a_new_token_creates_a_deliberate_duplicate(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("duplicate-save@example.com")
         client = Client()
         client.force_login(account)
 
         client.post(
             reverse("application_import_save"),
-            reviewed_values(company=str(company.pk)),
+            reviewed_values(creation_token="first-token", posting_url="https://example.com/jobs/1"),
+        )
+        client.post(
+            reverse("application_import_save"),
+            reviewed_values(
+                creation_token="second-token",
+                posting_url="https://example.com/jobs/1",
+                confirm_duplicate="on",
+            ),
         )
 
+        assert JobApplication.objects.filter(account=account).count() == 2
+
+    def test_duplicate_requires_explicit_confirmation(self, fake_ai: FakeAI) -> None:
+        account = verified_candidate("explicit@example.com")
+        make_application(account, posting_url="https://example.com/jobs/1")
+        client = Client()
+        client.force_login(account)
+
+        blocked = client.post(
+            reverse("application_import_save"),
+            reviewed_values(posting_url="https://example.com/jobs/1"),
+        )
+        assert blocked.status_code == 200
+        assert "matches an application you already have" in blocked.content.decode()
         assert JobApplication.objects.filter(account=account).count() == 1
-        assert not JobApplication.objects.filter(account=other).exists()
+
+        allowed = client.post(
+            reverse("application_import_save"),
+            reviewed_values(
+                posting_url="https://example.com/jobs/1",
+                confirm_duplicate="on",
+            ),
+        )
+        assert allowed.status_code == 302
+        assert JobApplication.objects.filter(account=account).count() == 2
 
 
 class TestHtmxParity:
@@ -433,13 +730,12 @@ class TestHtmxParity:
 
     def test_htmx_save_redirects_via_header(self, fake_ai: FakeAI) -> None:
         account = verified_candidate("htmx-save@example.com")
-        company = Company.objects.create(name="Example Careers")
         client = Client()
         client.force_login(account)
 
         response = client.post(
             reverse("application_import_save"),
-            reviewed_values(company=str(company.pk)),
+            reviewed_values(),
             headers={"HX-Request": "true"},
         )
 
@@ -473,7 +769,7 @@ def test_invalid_review_values_are_revalidated_and_do_not_raise() -> None:
 
     response = client.post(
         reverse("application_import_save"),
-        {"company": "999999", "role_title": "x", "job_description": "y"},
+        {"company_name": "", "role_title": "x", "job_description": "y"},
     )
 
     assert response.status_code == 200
@@ -482,12 +778,15 @@ def test_invalid_review_values_are_revalidated_and_do_not_raise() -> None:
 
 def test_create_imported_application_rejects_invalid_values() -> None:
     account = verified_candidate("service-revalidate@example.com")
-    company = Company.objects.create(name="Example Careers")
-    from apps.applications.imports import InvalidApplicationContents, create_imported_application
 
     with pytest.raises(InvalidApplicationContents):
         create_imported_application(
             account=account,
-            values={"role_title": "", "job_description": ""},
-            company=company,
+            values={
+                "company_name": "",
+                "company_website": "",
+                "role_title": "",
+                "job_description": "",
+            },
+            token="service-token",
         )

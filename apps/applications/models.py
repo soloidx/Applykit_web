@@ -53,7 +53,15 @@ class JobApplication(models.Model):
     company = models.ForeignKey(Company, on_delete=models.PROTECT, related_name="job_applications")
     role_title = models.CharField(max_length=255)
     job_description = models.TextField()
-    posting_url = models.URLField(blank=True)
+    posting_url = models.URLField(max_length=2048, blank=True)
+    creation_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        default=None,
+        editable=False,
+    )
     location = models.CharField(max_length=255, blank=True)
     compensation = models.CharField(max_length=255, blank=True)
     source = models.CharField(max_length=255, blank=True)

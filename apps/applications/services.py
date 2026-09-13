@@ -108,8 +108,11 @@ def calculate_skill_coverage(
 
 def normalized_registrable_domain(website: str) -> str:
     value = website.strip()
-    parsed = urlsplit(value if "://" in value else f"//{value}")
-    hostname = parsed.hostname
+    try:
+        parsed = urlsplit(value if "://" in value else f"//{value}")
+        hostname = parsed.hostname
+    except ValueError as error:
+        raise ValidationError("Enter a valid website hostname.") from error
     if not hostname:
         raise ValidationError("Enter a website with a hostname.")
 
@@ -124,6 +127,24 @@ def normalized_registrable_domain(website: str) -> str:
     return domain
 
 
+def find_company_by_domain(website: str) -> Company | None:
+    """Reuse an existing Company only through an exact domain match.
+
+    The website's registrable domain is compared with both canonical domains
+    and retained domain aliases. Name similarity never merges Companies.
+    """
+
+    return _find_company_by_registrable_domain(normalized_registrable_domain(website))
+
+
+def _find_company_by_registrable_domain(domain: str) -> Company | None:
+    return (
+        Company.objects.filter(Q(canonical_domain=domain) | Q(domain_aliases__domain=domain))
+        .order_by("pk")
+        .first()
+    )
+
+
 def create_or_reuse_company(name: str, website: str | None = None) -> tuple[Company, bool]:
     company_name = name.strip()
     if not company_name:
@@ -132,11 +153,7 @@ def create_or_reuse_company(name: str, website: str | None = None) -> tuple[Comp
         return Company.objects.create(name=company_name), True
 
     domain = normalized_registrable_domain(website)
-    existing = (
-        Company.objects.filter(Q(canonical_domain=domain) | Q(domain_aliases__domain=domain))
-        .order_by("pk")
-        .first()
-    )
+    existing = _find_company_by_registrable_domain(domain)
     if existing:
         return existing, False
     return Company.objects.get_or_create(

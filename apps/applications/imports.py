@@ -2,30 +2,39 @@
 
 The paste import is the only place a Job Application is created atomically from
 a reviewed browser-only draft. Nothing here persists before the explicit save,
-and a failure creates nothing. The reviewed Company must already exist in the
-shared catalog; this workflow never creates or mutates Company identity.
+and a failure creates nothing. The reviewed Company is reused only through an
+exact canonical-domain or domain-alias match; otherwise a provisional Company
+is created inside the same transaction that creates the Draft Job Application.
+A cryptographically random creation token makes repeated submission of one
+review return the original result instead of an accidental duplicate.
 """
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from apps.accounts.models import Account
 from apps.ai import errors as ai_errors
 from apps.ai.schemas import JobPostingExtraction
 from apps.applications.models import Company, JobApplication
+from apps.applications.provenance import normalized_posting_url
+from apps.applications.services import create_or_reuse_company, find_company_by_domain
 from apps.campaigns.models import Campaign
 
 __all__ = [
     "AI_FAILURE_MESSAGES",
     "CampaignUnavailable",
     "InvalidApplicationContents",
+    "company_match_for_website",
+    "create_imported_application",
     "failure_message",
     "has_usable_posting_facts",
-    "create_imported_application",
+    "matching_applications",
+    "new_creation_token",
 ]
 
 AI_FAILURE_MESSAGES = {
@@ -41,6 +50,8 @@ AI_FAILURE_MESSAGES = {
 }
 
 _DEFAULT_MESSAGE = "We could not complete the import. Nothing was saved."
+
+_CREATION_TOKEN_BYTES = 32
 
 
 class CampaignUnavailable(Exception):
@@ -59,10 +70,47 @@ def failure_message(category: str) -> str:
     return AI_FAILURE_MESSAGES.get(category, _DEFAULT_MESSAGE)
 
 
+def new_creation_token() -> str:
+    """Return a fresh, unguessable token for one rendered review draft."""
+
+    return secrets.token_urlsafe(_CREATION_TOKEN_BYTES)
+
+
 def has_usable_posting_facts(extraction: JobPostingExtraction) -> bool:
     """A posting is reviewable with a role title or a meaningful description."""
 
     return bool(extraction.role_title or extraction.job_description)
+
+
+def company_match_for_website(website: str) -> Company | None:
+    """Return the Company an exact domain match would reuse, if any."""
+
+    value = website.strip() if isinstance(website, str) else ""
+    if not value:
+        return None
+    try:
+        return find_company_by_domain(value)
+    except ValidationError:
+        return None
+
+
+def matching_applications(*, account: Account, posting_url: str) -> list[JobApplication]:
+    """Return the Account's applications that share the normalized posting URL."""
+
+    normalized = normalized_posting_url(posting_url)
+    if not normalized:
+        return []
+    candidates = (
+        JobApplication.objects.filter(account=account)
+        .exclude(posting_url="")
+        .select_related("company", "campaign")
+        .order_by("-updated_at", "-pk")
+    )
+    return [
+        application
+        for application in candidates
+        if normalized_posting_url(application.posting_url) == normalized
+    ]
 
 
 @transaction.atomic
@@ -70,14 +118,20 @@ def create_imported_application(
     *,
     account: Account,
     values: dict[str, Any],
-    company: Company,
+    token: str,
 ) -> JobApplication:
     """Create one Draft Job Application atomically for the reviewed draft.
 
-    The Active Campaign is locked and rechecked at save time so an archived
-    campaign cannot accept an import. A validation failure or any persistence
-    failure rolls back the whole transaction and creates nothing.
+    Repeated submission of the same creation token returns the original
+    application. The Active Campaign is locked and rechecked so an archived
+    campaign cannot accept an import. The Company is confirmed or provisionally
+    created in the same transaction. Any validation or persistence failure rolls
+    back the whole transaction and creates nothing.
     """
+
+    existing = _application_for_token(account, token)
+    if existing is not None:
+        return existing
 
     campaign = (
         Campaign.objects.select_for_update()
@@ -87,18 +141,38 @@ def create_imported_application(
     if campaign is None:
         raise CampaignUnavailable
 
-    application = JobApplication(
-        account=account,
-        campaign=campaign,
-        company=company,
-        role_title=str(values.get("role_title", "")),
-        job_description=str(values.get("job_description", "")),
-        location=str(values.get("location", "")),
-        compensation=str(values.get("compensation", "")),
-    )
     try:
-        application.full_clean(exclude=["account", "campaign", "company"])
+        with transaction.atomic():
+            company, _created = create_or_reuse_company(
+                str(values.get("company_name", "")),
+                str(values.get("company_website", "")).strip() or None,
+            )
+            application = JobApplication(
+                account=account,
+                campaign=campaign,
+                company=company,
+                role_title=str(values.get("role_title", "")),
+                job_description=str(values.get("job_description", "")),
+                posting_url=str(values.get("posting_url", "")),
+                location=str(values.get("location", "")),
+                compensation=str(values.get("compensation", "")),
+                creation_token=token,
+            )
+            application.full_clean(exclude=["account", "campaign", "company"])
+            application.save()
     except ValidationError as error:
         raise InvalidApplicationContents(error) from error
-    application.save()
+    except IntegrityError:
+        # A simultaneous submit of the same review won the unique creation
+        # token. Return its result instead of an accidental duplicate.
+        existing = _application_for_token(account, token)
+        if existing is not None:
+            return existing
+        raise
     return application
+
+
+def _application_for_token(account: Account, token: str) -> JobApplication | None:
+    if not token:
+        return None
+    return JobApplication.objects.filter(account=account, creation_token=token).first()
