@@ -25,6 +25,7 @@ class ExtractionSettings:
     memory_bytes: int
     temp_root: Path
     require_linux_isolation: bool
+    max_pdf_pages: int = 50
 
 
 def current_settings() -> ExtractionSettings:
@@ -41,4 +42,5 @@ def current_settings() -> ExtractionSettings:
         memory_bytes=int(configured.get("MEMORY_BYTES", 512 * 1024 * 1024)),
         temp_root=Path(temp_root),
         require_linux_isolation=bool(configured.get("REQUIRE_LINUX_ISOLATION", False)),
+        max_pdf_pages=int(configured.get("MAX_PDF_PAGES", 50)),
     )

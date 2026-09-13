@@ -3,7 +3,15 @@ import zipfile
 import pytest
 from docx_support import rewrite_zip
 
-from apps.documents.intake import DocumentLimits, PackageRejected, preflight_docx
+from apps.documents.intake import (
+    DOCX,
+    PDF,
+    DocumentLimits,
+    PackageRejected,
+    detect_format,
+    preflight_docx,
+    preflight_pdf,
+)
 
 TIGHT_LIMITS = DocumentLimits(
     max_bytes=10**9,
@@ -134,6 +142,87 @@ def test_rejects_oversized_file(make_docx):
             source,
             DocumentLimits(
                 max_bytes=10, max_members=500, max_expanded_bytes=10**9, max_member_bytes=10**9
+            ),
+        )
+    assert raised.value.category == "over_budget"
+
+
+def test_detects_docx_and_pdf_structurally(make_docx, make_pdf):
+    assert detect_format(make_docx(paragraphs=["Hello."])) == DOCX
+    assert detect_format(make_pdf(pages=["Hello."])) == PDF
+
+
+def test_detects_by_magic_not_filename(make_docx, make_pdf):
+    docx = make_docx(paragraphs=["Hello."])
+    pdf = make_pdf(pages=["Hello."])
+    mislabelled_pdf = docx.with_suffix(".pdf")
+    mislabelled_pdf.write_bytes(pdf.read_bytes())
+    mislabelled_docx = pdf.with_suffix(".docx")
+    mislabelled_docx.write_bytes(docx.read_bytes())
+
+    assert detect_format(mislabelled_pdf) == PDF
+    assert detect_format(mislabelled_docx) == DOCX
+
+
+def test_rejects_junk_bytes_as_malformed(tmp_path):
+    source = tmp_path / "junk.bin"
+    source.write_bytes(b"this is not a document at all")
+    with pytest.raises(PackageRejected) as raised:
+        detect_format(source)
+    assert raised.value.category == "malformed_document"
+
+
+def test_accepts_structurally_valid_pdf(make_pdf):
+    preflight_pdf(make_pdf(pages=["Hello."]), LIMITS)
+
+
+def test_rejects_encrypted_pdf_as_unsupported(make_pdf):
+    source = make_pdf(pages=["Secret"], encrypt="a-password")
+    with pytest.raises(PackageRejected) as raised:
+        preflight_pdf(source, LIMITS)
+    assert raised.value.category == "unsupported_format"
+
+
+def test_rejects_truncated_pdf_as_malformed(make_pdf):
+    source = make_pdf(pages=["Hello."])
+    truncated = source.with_name("truncated.pdf")
+    truncated.write_bytes(source.read_bytes()[: len(source.read_bytes()) // 2])
+    with pytest.raises(PackageRejected) as raised:
+        preflight_pdf(truncated, LIMITS)
+    assert raised.value.category == "malformed_document"
+
+
+def test_rejects_oversized_pdf(make_pdf):
+    source = make_pdf(pages=["Hello."])
+    with pytest.raises(PackageRejected) as raised:
+        preflight_pdf(
+            source,
+            DocumentLimits(
+                max_bytes=10, max_members=500, max_expanded_bytes=10**9, max_member_bytes=10**9
+            ),
+        )
+    assert raised.value.category == "over_budget"
+
+
+def test_rejects_pdf_without_magic_as_malformed(tmp_path):
+    source = tmp_path / "no-magic.pdf"
+    source.write_bytes(b"not a real pdf but has %%EOF")
+    with pytest.raises(PackageRejected) as raised:
+        preflight_pdf(source, LIMITS)
+    assert raised.value.category == "malformed_document"
+
+
+def test_rejects_pdf_over_page_budget_at_intake(make_pdf):
+    source = make_pdf(pages=[f"Page {index}" for index in range(6)])
+    with pytest.raises(PackageRejected) as raised:
+        preflight_pdf(
+            source,
+            DocumentLimits(
+                max_bytes=10**9,
+                max_members=500,
+                max_expanded_bytes=10**9,
+                max_member_bytes=10**9,
+                max_pdf_pages=5,
             ),
         )
     assert raised.value.category == "over_budget"

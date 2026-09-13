@@ -19,7 +19,7 @@ from apps.documents.protocol import (
     UNSUPPORTED_FORMAT,
     max_result_bytes,
 )
-from apps.documents.reader import DocumentParseError, read_docx_text
+from apps.documents.reader import DocumentParseError, read_docx_text, read_pdf_text
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,7 @@ class _Job:
     path: str
     format: str
     max_code_points: int
+    max_pages: int | None = None
 
 
 def main() -> None:
@@ -51,18 +52,35 @@ def _read_job() -> _Job | None:
     path = job.get("path")
     format_name = job.get("format")
     max_code_points = job.get("max_code_points")
+    max_pages = job.get("max_pages")
     if not isinstance(path, str) or not isinstance(format_name, str):
         return None
     if not isinstance(max_code_points, int) or isinstance(max_code_points, bool):
         return None
-    return _Job(path=path, format=format_name, max_code_points=max_code_points)
+    if max_pages is not None and (not isinstance(max_pages, int) or isinstance(max_pages, bool)):
+        return None
+    return _Job(
+        path=path,
+        format=format_name,
+        max_code_points=max_code_points,
+        max_pages=max_pages,
+    )
 
 
 def _process(job: _Job) -> dict[str, object]:
-    if job.format != "docx":
-        return {"ok": False, "category": UNSUPPORTED_FORMAT}
     try:
-        text = read_docx_text(Path(job.path), max_code_points=job.max_code_points)
+        if job.format == "docx":
+            text = read_docx_text(Path(job.path), max_code_points=job.max_code_points)
+        elif job.format == "pdf":
+            if job.max_pages is None:
+                return {"ok": False, "category": INTERNAL_ERROR}
+            text = read_pdf_text(
+                Path(job.path),
+                max_code_points=job.max_code_points,
+                max_pages=job.max_pages,
+            )
+        else:
+            return {"ok": False, "category": UNSUPPORTED_FORMAT}
     except DocumentParseError as error:
         return {"ok": False, "category": error.category}
     except TextOverBudget:

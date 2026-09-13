@@ -1,6 +1,6 @@
 import pytest
 
-from apps.documents.reader import DocumentParseError, read_docx_text
+from apps.documents.reader import DocumentParseError, read_docx_text, read_pdf_text
 
 _PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -55,4 +55,50 @@ def test_rejects_non_docx_bytes_as_malformed(tmp_path):
     source.write_bytes(b"definitely not a document")
     with pytest.raises(DocumentParseError) as raised:
         read_docx_text(source, max_code_points=1000)
+    assert raised.value.category == "malformed_document"
+
+
+def test_reads_text_based_pdf_with_page_structure(make_pdf):
+    source = make_pdf(pages=["Jane Doe\nPlatform Engineer", "Experience\nBuilt systems."])
+    text = read_pdf_text(source, max_code_points=1000, max_pages=50)
+    assert "Jane Doe" in text
+    assert "Platform Engineer" in text
+    assert text.index("Jane Doe") < text.index("Built systems.")
+
+
+def test_rejects_encrypted_pdf_as_unsupported_without_decrypting(make_pdf):
+    source = make_pdf(pages=["Secret"], encrypt="a-password")
+    with pytest.raises(DocumentParseError) as raised:
+        read_pdf_text(source, max_code_points=1000, max_pages=50)
+    assert raised.value.category == "unsupported_format"
+
+
+def test_rejects_image_only_pdf_as_unsupported(make_pdf):
+    source = make_pdf(image_only=True)
+    with pytest.raises(DocumentParseError) as raised:
+        read_pdf_text(source, max_code_points=1000, max_pages=50)
+    assert raised.value.category == "unsupported_format"
+
+
+def test_rejects_pdf_over_page_budget(make_pdf):
+    source = make_pdf(pages=[f"Page {index}" for index in range(51)])
+    with pytest.raises(DocumentParseError) as raised:
+        read_pdf_text(source, max_code_points=100_000, max_pages=50)
+    assert raised.value.category == "over_budget"
+
+
+def test_rejects_truncated_pdf_as_malformed(make_pdf):
+    source = make_pdf(pages=["Jane Doe"])
+    truncated = source.with_name("truncated.pdf")
+    truncated.write_bytes(source.read_bytes()[: len(source.read_bytes()) // 2])
+    with pytest.raises(DocumentParseError) as raised:
+        read_pdf_text(truncated, max_code_points=1000, max_pages=50)
+    assert raised.value.category == "malformed_document"
+
+
+def test_rejects_non_pdf_bytes_as_malformed(tmp_path):
+    source = tmp_path / "junk.pdf"
+    source.write_bytes(b"definitely not a pdf")
+    with pytest.raises(DocumentParseError) as raised:
+        read_pdf_text(source, max_code_points=1000, max_pages=50)
     assert raised.value.category == "malformed_document"

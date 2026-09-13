@@ -22,6 +22,7 @@ def load_production_settings(**overrides: str) -> subprocess.CompletedProcess[st
             "DJANGO_ALLOWED_HOSTS": "app.example.com",
             "RESEND_API_KEY": "re_test_key",
             "DEFAULT_FROM_EMAIL": "ApplyKit <noreply@example.com>",
+            "DOCUMENT_TEMP_ROOT": "/tmp/applykit-documents-test",
             **overrides,
         }
     )
@@ -68,3 +69,10 @@ def test_production_settings_reject_short_secret() -> None:
 
     assert result.returncode != 0
     assert "at least 50 characters" in result.stderr
+
+
+def test_production_settings_require_dedicated_document_temp_root() -> None:
+    result = load_production_settings(DOCUMENT_TEMP_ROOT="")
+
+    assert result.returncode != 0
+    assert "DOCUMENT_TEMP_ROOT" in result.stderr

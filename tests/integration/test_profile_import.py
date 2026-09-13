@@ -21,10 +21,12 @@ from apps.profiles.models import CandidateProfile
 from apps.profiles.versioning import profile_version_token
 from tests.integration.ai_test_support import ai_overrides, enable_switches
 from tests.unit.docx_support import build_docx
+from tests.unit.pdf_support import build_pdf
 
 pytestmark = [pytest.mark.integration, pytest.mark.django_db]
 
 DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PDF_CONTENT_TYPE = "application/pdf"
 TOKEN_PATTERN = re.compile(r'name="version_token" value="([^"]+)"')
 
 
@@ -38,6 +40,14 @@ def verified_candidate(email: str, *, consent: bool = True) -> Account:
 
 def source_bytes(tmp_path: Path, paragraphs: list[str] | None = None) -> bytes:
     path = build_docx(tmp_path / "resume.docx", paragraphs=paragraphs or ["Jane Doe", "Engineer"])
+    return path.read_bytes()
+
+
+def pdf_source_bytes(tmp_path: Path, pages: list[str] | None = None) -> bytes:
+    path = build_pdf(
+        tmp_path / "resume.pdf",
+        pages=pages or ["Jane Doe\nPlatform Engineer", "Built reliable tools."],
+    )
     return path.read_bytes()
 
 
@@ -96,10 +106,16 @@ def fake_ai(monkeypatch: pytest.MonkeyPatch):
     return fake
 
 
-def upload(client: Client, data: bytes, *, filename: str = "resume.docx"):
+def upload(
+    client: Client,
+    data: bytes,
+    *,
+    filename: str = "resume.docx",
+    content_type: str = DOCX_CONTENT_TYPE,
+):
     return client.post(
         reverse("profile_import_process"),
-        {"source": SimpleUploadedFile(filename, data, content_type=DOCX_CONTENT_TYPE)},
+        {"source": SimpleUploadedFile(filename, data, content_type=content_type)},
     )
 
 
@@ -147,6 +163,8 @@ class TestOnboardingPaths:
         assert f'action="{reverse("profile_import_process")}"' in content
         assert f'action="{reverse("profile")}"' in content
         assert 'enctype="multipart/form-data"' in content
+        assert "application/pdf" in content
+        assert ".docx" in content
 
     def test_import_requires_verified_authentication(self) -> None:
         response = Client().post(reverse("profile_import_process"), {})
@@ -355,6 +373,85 @@ class TestReviewDraft:
         assert fake_ai.calls == []
         assert not CandidateProfile.objects.filter(account=account).exists()
 
+    @pytest.mark.parametrize(
+        ("builder", "filename", "content_type", "expected_text"),
+        [
+            (source_bytes, "resume.docx", DOCX_CONTENT_TYPE, "Engineer"),
+            (pdf_source_bytes, "resume.pdf", PDF_CONTENT_TYPE, "Platform Engineer"),
+        ],
+        ids=["docx", "pdf"],
+    )
+    def test_accepted_docx_and_pdf_share_the_review_journey(
+        self,
+        fake_ai: FakeAI,
+        tmp_path: Path,
+        builder,
+        filename: str,
+        content_type: str,
+        expected_text: str,
+    ) -> None:
+        account = verified_candidate("shared-review@example.com")
+        client = Client()
+        client.force_login(account)
+
+        response = upload(client, builder(tmp_path), filename=filename, content_type=content_type)
+
+        assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "Check every source fact" in response.content.decode()
+        assert not CandidateProfile.objects.filter(account=account).exists()
+        assert fake_ai.calls and expected_text in fake_ai.calls[0][1]
+
+    def test_encrypted_pdf_is_unsupported_and_ai_is_never_called(
+        self, fake_ai: FakeAI, tmp_path: Path
+    ) -> None:
+        account = verified_candidate("encrypted-pdf@example.com")
+        client = Client()
+        client.force_login(account)
+        data = build_pdf(tmp_path / "encrypted.pdf", pages=["Secret"], encrypt="pw").read_bytes()
+
+        response = upload(client, data, filename="resume.pdf", content_type=PDF_CONTENT_TYPE)
+
+        assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        content = response.content.decode().lower()
+        assert "not a supported" in content
+        assert "your saved data is unchanged" in content
+        assert fake_ai.calls == []
+        assert not CandidateProfile.objects.filter(account=account).exists()
+
+    def test_image_only_pdf_is_unsupported_and_ai_is_never_called(
+        self, fake_ai: FakeAI, tmp_path: Path
+    ) -> None:
+        account = verified_candidate("image-pdf@example.com")
+        client = Client()
+        client.force_login(account)
+        data = build_pdf(tmp_path / "image-only.pdf", image_only=True).read_bytes()
+
+        response = upload(client, data, filename="scan.pdf", content_type=PDF_CONTENT_TYPE)
+
+        assert response.status_code == 200
+        assert "not a supported" in response.content.decode().lower()
+        assert fake_ai.calls == []
+        assert not CandidateProfile.objects.filter(account=account).exists()
+
+    def test_pdf_over_page_budget_is_reported_safely(self, fake_ai: FakeAI, tmp_path: Path) -> None:
+        account = verified_candidate("pages-pdf@example.com")
+        client = Client()
+        client.force_login(account)
+        data = build_pdf(
+            tmp_path / "many.pdf", pages=[f"Page {index}" for index in range(51)]
+        ).read_bytes()
+
+        response = upload(client, data, filename="many.pdf", content_type=PDF_CONTENT_TYPE)
+
+        assert response.status_code == 200
+        content = response.content.decode().lower()
+        assert "too large or too long" in content
+        assert "your saved data is unchanged" in content
+        assert fake_ai.calls == []
+        assert not CandidateProfile.objects.filter(account=account).exists()
+
 
 class TestAtomicSave:
     def test_save_creates_the_initial_profile_atomically(
@@ -364,6 +461,31 @@ class TestAtomicSave:
         client = Client()
         client.force_login(account)
         review = upload(client, source_bytes(tmp_path))
+        token = review_token(review)
+
+        response = client.post(
+            reverse("profile_import_save"),
+            reviewed_values(version_token=token),
+        )
+
+        assert response.status_code == 302
+        assert response.headers["Location"] == reverse("dashboard")
+        profile = CandidateProfile.objects.get(account=account)
+        assert profile.full_name == "Jane Doe"
+        assert profile.timezone == "Europe/London"
+
+    def test_pdf_source_saves_identically_after_review(
+        self, fake_ai: FakeAI, tmp_path: Path
+    ) -> None:
+        account = verified_candidate("pdf-save@example.com")
+        client = Client()
+        client.force_login(account)
+        review = upload(
+            client,
+            pdf_source_bytes(tmp_path),
+            filename="resume.pdf",
+            content_type=PDF_CONTENT_TYPE,
+        )
         token = review_token(review)
 
         response = client.post(

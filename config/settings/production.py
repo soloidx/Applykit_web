@@ -2,6 +2,7 @@ import os
 
 from django.core.exceptions import ImproperlyConfigured
 
+from . import base
 from .base import *  # noqa: F403
 
 DEBUG = False
@@ -35,5 +36,10 @@ SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
-# Production fails closed unless the Linux isolation path is available.
-DOCUMENT_EXTRACTION = {**DOCUMENT_EXTRACTION, "REQUIRE_LINUX_ISOLATION": True}  # noqa: F405
+# Production fails closed unless the Linux isolation path and dedicated
+# non-persistent temporary storage are both available.
+if not base.DOCUMENT_EXTRACTION.get("TEMP_ROOT"):
+    raise ImproperlyConfigured(
+        "Production requires DOCUMENT_TEMP_ROOT to point at dedicated non-persistent storage"
+    )
+DOCUMENT_EXTRACTION = {**base.DOCUMENT_EXTRACTION, "REQUIRE_LINUX_ISOLATION": True}

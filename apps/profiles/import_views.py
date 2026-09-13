@@ -1,10 +1,10 @@
 """Candidate Profile import views.
 
-The Source step uploads one DOCX, the Process step extracts and proposes core
-facts through the AI boundary, and the Review step renders a browser-only,
-no-store draft. Nothing persists until an explicit save creates the initial
-Candidate Profile atomically. Authentication, consent, admission, and a
-header-based CSRF check all run before the multipart body is read.
+The Source step uploads one DOCX or text-based PDF, the Process step extracts
+and proposes core facts through the AI boundary, and the Review step renders a
+browser-only, no-store draft. Nothing persists until an explicit save creates
+the initial Candidate Profile atomically. Authentication, consent, admission,
+and a header-based CSRF check all run before the multipart body is read.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from apps.ai.operations import (
     assert_candidate_profile_import_preconditions,
     extract_candidate_profile,
 )
-from apps.documents.extraction import DocumentExtractionError, extract_docx
+from apps.documents.extraction import DocumentExtractionError, extract_document
 from apps.profiles.csrf import header_csrf_protect
 from apps.profiles.import_forms import ProfileImportReviewForm
 from apps.profiles.imports import (
@@ -115,10 +115,10 @@ def profile_import_process(request: HttpRequest) -> HttpResponse:
     request.upload_handlers = [ProfileSourceUploadHandler(request)]
     source = request.FILES.get("source")
     if source is None:
-        return _failure(request, "Choose one DOCX document to import.")
+        return _failure(request, "Choose one DOCX or PDF document to import.")
 
     try:
-        extracted = extract_docx(cast(BinaryIO, source))
+        extracted = extract_document(cast(BinaryIO, source))
     except DocumentExtractionError as error:
         return _failure(request, failure_message(error.category, kind="document"))
 

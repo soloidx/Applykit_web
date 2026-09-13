@@ -25,6 +25,23 @@ def test_runs_real_docx_child_to_completion(make_docx):
     assert outcome.code_points == len("Isolated body text.")
 
 
+def test_runs_real_pdf_child_to_completion(make_pdf):
+    source = make_pdf(pages=["Isolated pdf body text."])
+    job = {"path": str(source), "format": "pdf", "max_code_points": 1000, "max_pages": 50}
+    outcome = run_isolated(job, limits=CPU_LIMITS, child_command=REPO_CHILD)
+    assert outcome.ok is True
+    assert outcome.text == "Isolated pdf body text."
+    assert outcome.code_points == len("Isolated pdf body text.")
+
+
+def test_child_rejects_unknown_format(make_docx):
+    source = make_docx(paragraphs=["Hello."])
+    job = {"path": str(source), "format": "odt", "max_code_points": 1000}
+    outcome = run_isolated(job, limits=CPU_LIMITS, child_command=REPO_CHILD)
+    assert outcome.ok is False
+    assert outcome.category == "unsupported_format"
+
+
 def test_wall_timeout_terminates_child_and_reports_timeout():
     command = [sys.executable, "-c", "import time; time.sleep(30)"]
     limits = ProcessLimits(

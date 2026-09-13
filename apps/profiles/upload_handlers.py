@@ -28,7 +28,8 @@ class ProfileSourceUploadHandler(MemoryFileUploadHandler):
 
     ``MemoryFileUploadHandler`` decides activation from
     ``FILE_UPLOAD_MAX_MEMORY_SIZE``; this route accepts the document-extraction
-    bound instead, so larger but still supported DOCX uploads reach extraction.
+    bound instead, so larger but still supported DOCX and PDF uploads reach
+    extraction.
     """
 
     def handle_raw_input(

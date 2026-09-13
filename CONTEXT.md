@@ -105,9 +105,9 @@ Removing a source-backed item from a Resume deletes its descendant overlay state
 
 ### Document Extraction Boundary
 
-The isolated component that turns one supported source upload into bounded canonical text. It validates the package structurally, spools the source into generated private per-request non-persistent storage, and extracts in a fresh resource-limited child process with a bounded result pipe.
+The isolated component that turns one supported source upload into bounded canonical text. It validates the container structurally, spools the source into generated private per-request non-persistent storage, and extracts in a fresh resource-limited child process with a bounded result pipe. Supported sources are DOCX packages and text-extractable PDFs up to 50 pages; encrypted, image-only, malformed, partial, hostile, or over-budget sources are rejected.
 
-Canonical text is normalized to NFC, has unsafe control characters removed, preserves meaningful headings and paragraphs, and is bounded by a hard code-point limit. Over-budget, malformed, unsupported, or hostile sources fail with a fixed content-safe category; they are never repaired or truncated.
+Canonical text is normalized to NFC, has unsafe control characters removed, preserves meaningful headings and paragraphs, and is bounded by a hard code-point limit. Over-budget, malformed, unsupported, or hostile sources fail with a fixed content-safe category; they are never repaired or truncated. Encrypted PDFs are never decrypted and image-only PDFs are never OCRed.
 
 Do not call the extraction result parsed HTML or a document draft. It is untrusted delimited prompt input for a later AI operation.
 

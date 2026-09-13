@@ -69,9 +69,13 @@ AI_FAILURE_MESSAGES = {
 }
 
 DOCUMENT_FAILURE_MESSAGES = {
-    document_protocol.UNSUPPORTED_FORMAT: "That file is not a supported DOCX document.",
-    document_protocol.MALFORMED_DOCUMENT: "That file could not be read as a DOCX document.",
-    document_protocol.OVER_BUDGET: "That document is too large to process safely.",
+    document_protocol.UNSUPPORTED_FORMAT: (
+        "That file is not a supported DOCX or text-based PDF document."
+    ),
+    document_protocol.MALFORMED_DOCUMENT: (
+        "That file could not be read as a DOCX or text-based PDF document."
+    ),
+    document_protocol.OVER_BUDGET: "That document is too large or too long to process safely.",
     document_protocol.PROCESSING_TIMEOUT: "Reading that document took too long.",
     document_protocol.EXTRACTION_UNAVAILABLE: "Document processing is not available right now.",
     document_protocol.INTERNAL_ERROR: "Something went wrong while reading that document.",

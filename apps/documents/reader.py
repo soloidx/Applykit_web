@@ -1,9 +1,9 @@
-"""Narrow DOCX text extraction running inside the isolated child process.
+"""Narrow document text extraction running inside the isolated child process.
 
-Mammoth reads the body text; a narrow python-docx traversal collects the
-active (non-linked) headers and footers. The result is canonicalized to a
-bounded, structured plain-text form. All parse failures are mapped to fixed,
-content-safe categories.
+Mammoth reads DOCX body text; a narrow python-docx traversal collects the
+active (non-linked) headers and footers. Strict pypdf reads text-based PDFs.
+The result is canonicalized to a bounded, structured plain-text form. All
+parse failures are mapped to fixed, content-safe categories.
 """
 
 import zipfile
@@ -12,15 +12,18 @@ from pathlib import Path
 
 import mammoth
 from docx import Document
+from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 
 from apps.documents.canonicalization import canonicalize
-from apps.documents.protocol import MALFORMED_DOCUMENT
+from apps.documents.protocol import MALFORMED_DOCUMENT, OVER_BUDGET, UNSUPPORTED_FORMAT
 
-__all__ = ["DocumentParseError", "read_docx_text"]
+__all__ = ["DocumentParseError", "read_docx_text", "read_pdf_text"]
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _BLOCK_TAGS = _HEADING_TAGS | {"p", "li", "tr"}
 _CELL_TAGS = frozenset({"td", "th"})
+_PDF_PARSE_ERRORS = PyPdfError, OSError, ValueError, KeyError
 
 
 class DocumentParseError(Exception):
@@ -66,6 +69,50 @@ class _BlockTextParser(HTMLParser):
             self._heading_level = None
         else:
             self.blocks.append(text)
+
+
+def read_pdf_text(path: Path, *, max_code_points: int, max_pages: int) -> str:
+    """Read text from a text-extractable PDF, strictly and without decryption.
+
+    Encrypted, image-only, malformed, or over-page-budget PDFs are rejected
+    with a fixed category; ApplyKit never decrypts, repairs, or OCRs a source.
+    """
+    reader = _open_pdf(path)
+    if reader.is_encrypted:
+        raise DocumentParseError(UNSUPPORTED_FORMAT)
+
+    try:
+        page_count = len(reader.pages)
+    except _PDF_PARSE_ERRORS as error:
+        raise DocumentParseError(MALFORMED_DOCUMENT) from error
+    if page_count == 0:
+        raise DocumentParseError(MALFORMED_DOCUMENT)
+    if page_count > max_pages:
+        raise DocumentParseError(OVER_BUDGET)
+
+    blocks: list[str] = []
+    for page in reader.pages:
+        try:
+            page_text = page.extract_text() or ""
+        except _PDF_PARSE_ERRORS as error:
+            raise DocumentParseError(MALFORMED_DOCUMENT) from error
+        text = page_text.strip()
+        if text:
+            blocks.append(text)
+
+    if not blocks:
+        # No text layer: most likely a scanned, image-only document. ApplyKit
+        # does not OCR, so this is unsupported rather than an empty import.
+        raise DocumentParseError(UNSUPPORTED_FORMAT)
+
+    return canonicalize("\n\n".join(blocks), max_code_points=max_code_points)
+
+
+def _open_pdf(path: Path) -> PdfReader:
+    try:
+        return PdfReader(str(path), strict=True)
+    except _PDF_PARSE_ERRORS as error:
+        raise DocumentParseError(MALFORMED_DOCUMENT) from error
 
 
 def read_docx_text(path: Path, *, max_code_points: int) -> str:

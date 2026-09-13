@@ -10,9 +10,10 @@ import sys
 
 import pytest
 from docx_support import build_docx
+from pdf_support import build_pdf
 
 from apps.documents.conf import ExtractionSettings
-from apps.documents.extraction import extract_docx
+from apps.documents.extraction import extract_document
 from apps.documents.runner import ProcessLimits, run_isolated
 
 pytestmark = [
@@ -35,8 +36,27 @@ def test_production_isolation_gate_allows_linux(tmp_path):
         temp_root=tmp_path / "private",
         require_linux_isolation=True,
     )
-    result = extract_docx(io.BytesIO(source.read_bytes()), config=config)
+    result = extract_document(io.BytesIO(source.read_bytes()), config=config)
     assert "Container body text." in result.text
+
+
+def test_production_isolation_gate_allows_linux_pdf(tmp_path):
+    source = build_pdf(tmp_path / "source.pdf", pages=["Container pdf body text."])
+    config = ExtractionSettings(
+        max_upload_bytes=10 * 1024 * 1024,
+        max_members=500,
+        max_expanded_bytes=64 * 1024 * 1024,
+        max_member_bytes=32 * 1024 * 1024,
+        max_code_points=100_000,
+        cpu_seconds=10,
+        wall_seconds=15.0,
+        memory_bytes=512 * 1024 * 1024,
+        temp_root=tmp_path / "private",
+        require_linux_isolation=True,
+        max_pdf_pages=50,
+    )
+    result = extract_document(io.BytesIO(source.read_bytes()), config=config)
+    assert "Container pdf body text." in result.text
 
 
 def test_memory_limit_is_enforced_in_container():

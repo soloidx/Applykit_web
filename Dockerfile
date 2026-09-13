@@ -36,6 +36,7 @@ RUN DJANGO_SETTINGS_MODULE=config.settings.production \
     DATABASE_URL=postgresql://build:build@localhost:5432/applykit \
     RESEND_API_KEY=build-only-key \
     DEFAULT_FROM_EMAIL=build@example.com \
+    DOCUMENT_TEMP_ROOT=/tmp/applykit-documents \
     uv run --no-sync python manage.py collectstatic --noinput
 
 EXPOSE 8000
