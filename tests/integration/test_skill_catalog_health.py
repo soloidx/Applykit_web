@@ -121,17 +121,19 @@ def test_catalog_health_detects_a_dangling_skill_alias() -> None:
 
 @pytest.mark.django_db
 def test_canonical_alias_cannot_be_deleted_through_the_domain_operation() -> None:
+    administrator = Account.objects.create_superuser("admin@example.com", "a-secure-password")
     concept, _ = resolve_skill_label("Python")
     canonical = SkillAlias.objects.get(concept=concept, is_canonical=True)
 
     with pytest.raises(ValidationError):
-        delete_skill_alias(alias=canonical)
+        delete_skill_alias(alias=canonical, actor=administrator, reason="Repair")
 
     assert SkillAlias.objects.filter(pk=canonical.pk).exists()
 
 
 @pytest.mark.django_db
 def test_referenced_alias_cannot_be_deleted_through_the_domain_operation() -> None:
+    administrator = Account.objects.create_superuser("admin@example.com", "a-secure-password")
     application = _application("referenced@example.com")
     concept, _ = resolve_skill_label("Python")
     variant = SkillAlias.objects.create(concept=concept, display_name="py")
@@ -142,17 +144,18 @@ def test_referenced_alias_cannot_be_deleted_through_the_domain_operation() -> No
     )
 
     with pytest.raises(ValidationError):
-        delete_skill_alias(alias=variant)
+        delete_skill_alias(alias=variant, actor=administrator, reason="Repair")
 
     assert SkillAlias.objects.filter(pk=variant.pk).exists()
 
 
 @pytest.mark.django_db
 def test_unreferenced_noncanonical_alias_can_be_deleted_through_the_domain_operation() -> None:
+    administrator = Account.objects.create_superuser("admin@example.com", "a-secure-password")
     concept, _ = resolve_skill_label("Python")
     variant = SkillAlias.objects.create(concept=concept, display_name="py")
 
-    delete_skill_alias(alias=variant)
+    delete_skill_alias(alias=variant, actor=administrator, reason="Repair")
 
     assert not SkillAlias.objects.filter(pk=variant.pk).exists()
     assert SkillAlias.objects.filter(concept=concept, is_canonical=True).exists()

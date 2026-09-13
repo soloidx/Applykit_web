@@ -138,3 +138,57 @@ class SkillAlias(models.Model):
         if not _catalog_operation.get():
             raise ValidationError("Delete a skill alias through the skills-domain operation.")
         return super().delete(*args, **kwargs)
+
+
+class SkillCatalogAudit(models.Model):
+    """An append-only record of one administrative catalog repair.
+
+    Audits are immutable scalar snapshots: they record the actor, the required
+    reason, public wording and normalized values, the before/after concept
+    identity, and the affected private relationship IDs and counts. They never
+    store private content such as role titles, descriptions, account emails of
+    candidates, or company names. They survive the repair entity and are never
+    updated or deleted.
+    """
+
+    class Operation(models.TextChoices):
+        ALIAS_REASSIGNMENT = "alias_reassignment", "Alias reassignment"
+        ALIAS_DELETION = "alias_deletion", "Alias deletion"
+
+    operation = models.CharField(max_length=32, choices=Operation.choices)
+    actor_id = models.BigIntegerField()
+    actor_email = models.CharField(max_length=254)
+    reason = models.TextField()
+    alias_id = models.BigIntegerField()
+    alias_display_name = models.CharField(max_length=200)
+    alias_normalized_value = models.CharField(max_length=200)
+    source_concept_id = models.BigIntegerField()
+    source_concept_name = models.CharField(max_length=200)
+    source_concept_key = models.CharField(max_length=200)
+    destination_concept_id = models.BigIntegerField(null=True, blank=True)
+    destination_concept_name = models.CharField(max_length=200, blank=True)
+    destination_concept_key = models.CharField(max_length=200, blank=True)
+    affected_application_ids = models.JSONField(default=list)
+    affected_requirement_ids = models.JSONField(default=list)
+    removed_requirement_ids = models.JSONField(default=list)
+    promoted_requirement_ids = models.JSONField(default=list)
+    kept_requirement_ids = models.JSONField(default=list)
+    collision_application_ids = models.JSONField(default=list)
+    affected_requirement_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        verbose_name = "skill catalog audit"
+        verbose_name_plural = "skill catalog audits"
+
+    def __str__(self) -> str:
+        return f"{self.get_operation_display()} for alias {self.alias_display_name}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Skill catalog audits are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Skill catalog audits are immutable.")

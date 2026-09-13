@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>Current concept: <strong>{{ alias.concept }}</strong> ({{ alias.normalized_value }})</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    {% if preview %}
+      <h2>Preview</h2>
+      <p>Affected Job Applications: {{ preview.affected_application_ids|length }}</p>
+      <p>
+        Requirements whose effective concept changes:
+        {{ preview.moved_requirement_ids|length }}
+      </p>
+      <ul>
+        {% for application_id in preview.affected_application_ids %}
+          <li>Job Application {{ application_id }}</li>
+        {% endfor %}
+      </ul>
+      {% if preview.collisions %}
+        <h3>Collisions</h3>
+        <ul>
+          {% for collision in preview.collisions %}
+            <li>
+              Job Application {{ collision.application_id }}:
+              keep requirement {{ collision.kept_requirement_id }}
+              ({{ collision.kept_classification }}) and remove requirement
+              {{ collision.removed_requirement_id }}{% if collision.promoted %}
+              (promoted to Required){% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <input type="hidden" name="preview_token" value="{{ preview.token }}">
+      <input type="submit" name="action" value="confirm">
+    {% else %}
+      <input type="submit" name="action" value="preview">
+    {% endif %}
+  </form>
+{% endblock %}

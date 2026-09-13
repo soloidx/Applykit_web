@@ -1,0 +1,14 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>
+    Only an unreferenced noncanonical alias may be deleted. The repair reason
+    is recorded on the immutable catalog audit.
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <input type="submit" value="Delete alias">
+  </form>
+{% endblock %}
