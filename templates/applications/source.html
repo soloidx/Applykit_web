@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}New application | ApplyKit{% endblock %}
+
+{% block content %}
+<section class="mx-auto max-w-5xl px-6 py-12 sm:py-20">
+  <div id="import-stage">
+    {% include "applications/_import_steps.html" with current="source" %}
+
+    <div class="mt-8 rounded-[2rem] border border-ink/10 bg-cream p-6 shadow-[0_24px_80px_rgba(41,38,33,0.08)] sm:p-10">
+      <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Guided import</p>
+      <h1 class="mt-3 font-display text-4xl font-semibold tracking-tight sm:text-5xl">Start a new application.</h1>
+      <p class="mt-5 max-w-3xl leading-7 text-ink/70">Paste the job posting to have ApplyKit propose the explicit facts for review, or enter the application by hand. Both paths create one Draft application in your Active Campaign.</p>
+
+      <div class="mt-10 grid gap-6 lg:grid-cols-2">
+        <section class="rounded-3xl border border-ink/10 bg-sand/60 p-6 sm:p-8" aria-labelledby="paste-heading">
+          <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Paste the posting</p>
+          <h2 id="paste-heading" class="mt-2 font-display text-3xl font-semibold tracking-tight">Import from text.</h2>
+          <p class="mt-3 text-sm leading-6 text-ink/65">Paste the plain posting text. ApplyKit proposes only the role title, description, location, and compensation the text states; you review and confirm every value. ApplyKit never retrieves the posting from a URL.</p>
+          <form class="mt-6 space-y-4" method="post" action="{% url 'application_import_process' %}" hx-post="{% url 'application_import_process' %}" hx-target="#import-stage" hx-select="#import-stage" hx-swap="outerHTML">
+            {% csrf_token %}
+            <label class="block text-sm font-semibold text-ink" for="posting-text">Posting text</label>
+            <textarea class="min-h-48 w-full rounded-2xl border border-ink/20 bg-white px-4 py-3" id="posting-text" name="posting_text" placeholder="Paste the job posting here" required></textarea>
+            <p class="text-xs leading-5 text-ink/55">Up to 50,000 characters. The text is processed for this request only and is never stored.</p>
+            <button class="w-full rounded-full bg-ink px-6 py-3 text-sm font-semibold text-sand transition hover:bg-coral" type="submit">Import and review</button>
+          </form>
+          <p class="mt-4 text-xs leading-5 text-ink/55">Import uses AI-assisted extraction. <a class="font-semibold text-coral hover:text-ink" href="{% url 'ai_consent' %}?next={% url 'application_create' %}">Review the AI data-use disclosure</a> before you paste; you can always enter the application manually instead.</p>
+        </section>
+
+        <section class="rounded-3xl border border-ink/10 bg-sand/60 p-6 sm:p-8" aria-labelledby="manual-heading">
+          <p class="text-sm font-semibold uppercase tracking-[0.22em] text-coral">Enter it manually</p>
+          <h2 id="manual-heading" class="mt-2 font-display text-3xl font-semibold tracking-tight">Add the details yourself.</h2>
+          <form class="mt-6 flex gap-2" method="get" action="{% url 'application_create' %}">
+            <label class="sr-only" for="company-search">Search shared companies</label>
+            <input class="w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="company-search" name="q" value="{{ company_query }}" type="search" placeholder="Search shared companies">
+            <button class="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold transition hover:border-coral hover:text-coral" type="submit">Search</button>
+          </form>
+          <form class="mt-4 grid gap-5" method="post" action="{% url 'application_create' %}">
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            <div>
+              <label class="text-sm font-semibold" for="{{ form.company.id_for_label }}">Existing company</label>
+              <select class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.company.id_for_label }}" name="{{ form.company.html_name }}">
+                <option value="">Choose an existing company</option>
+                {% for company in form.company.field.queryset %}
+                <option value="{{ company.pk }}"{% if form.company.value|stringformat:"s" == company.pk|stringformat:"s" %} selected{% endif %}>{{ company.name }}{% if company.canonical_domain %} · {{ company.canonical_domain }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <p class="text-sm text-ink/60">Or contribute a new shared company identity.</p>
+            <div>
+              <label class="text-sm font-semibold" for="{{ form.company_name.id_for_label }}">Company name</label>
+              <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.company_name.id_for_label }}" name="{{ form.company_name.html_name }}" value="{{ form.company_name.value|default_if_none:'' }}">
+              {{ form.company_name.errors }}
+            </div>
+            <div>
+              <label class="text-sm font-semibold" for="{{ form.website.id_for_label }}">Website (optional)</label>
+              <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ form.website.id_for_label }}" name="{{ form.website.html_name }}" value="{{ form.website.value|default_if_none:'' }}">
+              {{ form.website.errors }}
+            </div>
+            {% for field in form.visible_fields %}
+              {% if field.name != "company" and field.name != "company_name" and field.name != "website" %}
+              <div>
+                <label class="text-sm font-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {% if field.name == "job_description" or field.name == "private_notes" %}
+                <textarea class="mt-2 min-h-28 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ field.id_for_label }}" name="{{ field.html_name }}">{{ field.value|default_if_none:'' }}</textarea>
+                {% else %}
+                <input class="mt-2 w-full rounded-xl border border-ink/20 bg-white px-4 py-3" id="{{ field.id_for_label }}" name="{{ field.html_name }}" type="{% if field.name == 'posting_url' %}url{% else %}text{% endif %}" value="{{ field.value|default_if_none:'' }}"{% if field.field.required %} required{% endif %}>
+                {% endif %}
+                {{ field.errors }}
+              </div>
+              {% endif %}
+            {% endfor %}
+            <button class="justify-self-start rounded-full bg-coral px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink" type="submit">Create draft</button>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

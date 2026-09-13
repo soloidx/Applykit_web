@@ -1,0 +1,6 @@
+<ol class="grid grid-cols-4 overflow-hidden rounded-2xl border border-ink/10 bg-cream text-xs font-semibold sm:text-sm">
+  <li class="p-3 sm:p-4{% if current == 'source' %} bg-sand text-ink{% else %} text-ink/50{% endif %}"{% if current == 'source' %} aria-current="step"{% endif %}><span class="block text-coral">01</span>Source</li>
+  <li class="border-l border-ink/10 p-3 sm:p-4{% if current == 'process' %} bg-sand text-ink{% else %} text-ink/50{% endif %}"{% if current == 'process' %} aria-current="step"{% endif %}><span class="block text-coral">02</span>Process</li>
+  <li class="border-l border-ink/10 p-3 sm:p-4{% if current == 'review' %} bg-sand text-ink{% else %} text-ink/50{% endif %}"{% if current == 'review' %} aria-current="step"{% endif %}><span class="block text-coral">03</span>Review</li>
+  <li class="border-l border-ink/10 p-3 sm:p-4{% if current == 'save' %} bg-sand text-ink{% else %} text-ink/50{% endif %}"{% if current == 'save' %} aria-current="step"{% endif %}><span class="block text-coral">04</span>Save</li>
+</ol>

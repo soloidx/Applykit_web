@@ -1,5 +1,6 @@
 from django.urls import path
 
+from apps.applications.import_views import application_import_process, application_import_save
 from apps.applications.views import (
     application_board,
     application_create,
@@ -18,6 +19,16 @@ from apps.applications.views import (
 urlpatterns = [
     path("applications/", application_board, name="application_board"),
     path("applications/new/", application_create, name="application_create"),
+    path(
+        "applications/import/",
+        application_import_process,
+        name="application_import_process",
+    ),
+    path(
+        "applications/import/save/",
+        application_import_save,
+        name="application_import_save",
+    ),
     path("applications/<int:application_id>/", application_detail, name="application_detail"),
     path("applications/<int:application_id>/edit/", application_edit, name="application_edit"),
     path(

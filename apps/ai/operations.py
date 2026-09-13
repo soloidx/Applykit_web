@@ -34,6 +34,7 @@ from apps.documents.canonicalization import TextOverBudget, canonicalize
 
 __all__ = [
     "assert_candidate_profile_import_preconditions",
+    "assert_job_posting_import_preconditions",
     "extract_candidate_profile",
     "extract_job_posting",
 ]
@@ -92,8 +93,24 @@ def assert_candidate_profile_import_preconditions(account: Account) -> None:
     transmission. Raises :class:`AIError` with a fixed safe category.
     """
 
+    _assert_import_preconditions(account, conf.FEATURE_CANDIDATE_PROFILE)
+
+
+def assert_job_posting_import_preconditions(account: Account) -> None:
+    """Gate the Job Application paste route before any text is processed.
+
+    Rechecks consent, feature configuration, and admission availability without
+    reserving. The authoritative consent recheck, reservation, and audit still
+    happen inside :func:`extract_job_posting` immediately before transmission.
+    Raises :class:`AIError` with a fixed safe category.
+    """
+
+    _assert_import_preconditions(account, conf.FEATURE_JOB_POSTING)
+
+
+def _assert_import_preconditions(account: Account, feature: str) -> None:
     try:
-        config = conf.feature_config(conf.FEATURE_CANDIDATE_PROFILE)
+        config = conf.feature_config(feature)
     except conf.ConfigurationError:
         raise AIError(CONFIGURATION_ERROR) from None
     if not has_current_consent(account):

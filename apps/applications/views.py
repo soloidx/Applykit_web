@@ -111,7 +111,11 @@ def application_create(request: HttpRequest) -> HttpResponse:
                 | Q(canonical_domain__icontains=query)
                 | Q(domain_aliases__domain__icontains=query)
             ).order_by("name")
-        return render(request, "applications/form.html", {"form": form, "company_query": query})
+        return render(
+            request,
+            "applications/source.html",
+            {"form": form, "company_query": query},
+        )
     if request.method != "POST":
         return HttpResponse(status=405)
 
@@ -148,7 +152,11 @@ def application_create(request: HttpRequest) -> HttpResponse:
                 request,
                 reverse("application_edit", args=[application.pk]),
             )
-    return render(request, "applications/form.html", {"form": form})
+    return render(
+        request,
+        "applications/source.html",
+        {"form": form, "company_query": ""},
+    )
 
 
 @login_required
