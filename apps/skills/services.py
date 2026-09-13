@@ -15,6 +15,7 @@ from apps.skills.models import (
     SkillAlias,
     SkillCatalogAudit,
     SkillConcept,
+    SkillConceptMergeAudit,
     catalog_operation,
     clean_skill_label,
     normalize_skill_label,
@@ -91,6 +92,154 @@ class _ReassignmentPlan:
     moved_requirement_ids: tuple[int, ...]
     removed_requirement_ids: tuple[int, ...]
     collisions: tuple[ReassignmentCollision, ...]
+
+
+@dataclass(frozen=True)
+class MergedAliasDetail:
+    alias_id: int
+    display_name: str
+    normalized_value: str
+    is_canonical: bool
+    requirement_count: int
+
+
+@dataclass(frozen=True)
+class SkillAssociationCollision:
+    kind: str
+    owner_id: int
+    kept_id: int
+    discarded_id: int
+    kept_position: int
+
+
+@dataclass(frozen=True)
+class RequirementCollision:
+    application_id: int
+    kept_requirement_id: int
+    discarded_requirement_ids: tuple[int, ...]
+    kept_classification: str
+    promoted: bool
+
+
+@dataclass(frozen=True)
+class ResumeSkillCollision:
+    resume_id: int
+    kept_resume_skill_id: int
+    discarded_resume_skill_id: int
+    included: bool
+    position: int
+    has_label_override: bool
+
+
+@dataclass(frozen=True)
+class SkillConceptMergePreview:
+    loser_concept_id: int
+    survivor_concept_id: int
+    token: str
+    aliases: tuple[MergedAliasDetail, ...]
+    profile_skill_ids: tuple[int, ...]
+    experience_skill_ids: tuple[int, ...]
+    project_skill_ids: tuple[int, ...]
+    requirement_ids: tuple[int, ...]
+    resume_skill_ids: tuple[int, ...]
+    skill_collisions: tuple[SkillAssociationCollision, ...]
+    requirement_collisions: tuple[RequirementCollision, ...]
+    resume_collisions: tuple[ResumeSkillCollision, ...]
+
+    @property
+    def discarded_profile_skill_ids(self) -> tuple[int, ...]:
+        return tuple(
+            collision.discarded_id
+            for collision in self.skill_collisions
+            if collision.kind == "profile"
+        )
+
+    @property
+    def discarded_experience_skill_ids(self) -> tuple[int, ...]:
+        return tuple(
+            collision.discarded_id
+            for collision in self.skill_collisions
+            if collision.kind == "experience"
+        )
+
+    @property
+    def discarded_project_skill_ids(self) -> tuple[int, ...]:
+        return tuple(
+            collision.discarded_id
+            for collision in self.skill_collisions
+            if collision.kind == "project"
+        )
+
+    @property
+    def discarded_requirement_ids(self) -> tuple[int, ...]:
+        return tuple(
+            sorted(
+                requirement_id
+                for collision in self.requirement_collisions
+                for requirement_id in collision.discarded_requirement_ids
+            )
+        )
+
+    @property
+    def discarded_resume_skill_ids(self) -> tuple[int, ...]:
+        return tuple(collision.discarded_resume_skill_id for collision in self.resume_collisions)
+
+    @property
+    def promoted_requirement_ids(self) -> tuple[int, ...]:
+        return tuple(
+            collision.kept_requirement_id
+            for collision in self.requirement_collisions
+            if collision.promoted
+        )
+
+
+@dataclass(frozen=True)
+class SkillConceptMergeResult:
+    survivor: SkillConcept
+    audit: SkillConceptMergeAudit
+
+
+@dataclass(frozen=True)
+class _AssociationMerge:
+    kind: str
+    model: Any
+    owner_field: str
+    loser_rows: tuple[Any, ...]
+    survivor_rows: tuple[Any, ...]
+    collisions: tuple[SkillAssociationCollision, ...]
+    affected_ids: tuple[int, ...]
+    discarded_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _RequirementMerge:
+    rows: tuple[Any, ...]
+    collisions: tuple[RequirementCollision, ...]
+    affected_ids: tuple[int, ...]
+    discarded_ids: tuple[int, ...]
+    promoted_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _ResumeMerge:
+    loser_rows: tuple[Any, ...]
+    survivor_rows: tuple[Any, ...]
+    collisions: tuple[ResumeSkillCollision, ...]
+    affected_ids: tuple[int, ...]
+    discarded_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _MergePlan:
+    token: str
+    aliases: tuple[SkillAlias, ...]
+    alias_snapshots: tuple[dict[str, Any], ...]
+    alias_requirement_counts: dict[int, int]
+    profile: _AssociationMerge
+    experience: _AssociationMerge
+    project: _AssociationMerge
+    requirements: _RequirementMerge
+    resumes: _ResumeMerge
 
 
 def _resolved_skill_label(normalized_value: str) -> SkillAlias | None:
@@ -855,3 +1004,574 @@ def rename_skill_concept(*, concept: SkillConcept, canonical_name: str) -> Skill
         locked_concept.canonical_name = display_name
         locked_concept.save(update_fields=["canonical_name", "canonical_key", "updated_at"])
     return locked_concept
+
+
+def preview_skill_concept_merge(
+    *,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    actor: Any,
+) -> SkillConceptMergePreview:
+    """Preview the aliases, references, and collisions a concept merge would resolve.
+
+    The preview reads the current catalog without mutating it and returns an
+    opaque token. Confirmation must present that token so a stale preview
+    cannot overwrite a catalog that changed after the preview.
+    """
+
+    _require_administrator(actor)
+    source = SkillConcept.objects.get(pk=loser.pk)
+    destination = SkillConcept.objects.get(pk=survivor.pk)
+    _validate_concept_merge(source, destination)
+    plan = _merge_plan(source, destination, lock=False)
+    return _merge_preview_from_plan(source, destination, plan)
+
+
+@transaction.atomic
+def merge_skill_concept(
+    *,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    actor: Any,
+    reason: str,
+    preview_token: str,
+) -> SkillConceptMergeResult:
+    """Atomically merge one Skill Concept into a surviving concept.
+
+    Every alias and reference moves to the survivor, every private-location
+    collision resolves to a single row, the losing Concept is hard-deleted, and
+    an immutable, content-free audit is appended. Stale previews and any
+    persistence error roll the entire operation back.
+    """
+
+    _require_administrator(actor)
+    merge_reason = _require_repair_reason(reason)
+    if not preview_token:
+        raise ValidationError("Preview the merge before confirming it.")
+
+    from apps.applications.models import JobApplication
+
+    locked_loser = SkillConcept.objects.select_for_update().get(pk=loser.pk)
+    locked_survivor = SkillConcept.objects.select_for_update().get(pk=survivor.pk)
+    _validate_concept_merge(locked_loser, locked_survivor)
+    list(
+        JobApplication.objects.select_for_update()
+        .filter(pk__in=_merge_affected_application_ids(locked_loser))
+        .order_by("pk")
+    )
+    plan = _merge_plan(locked_loser, locked_survivor, lock=True)
+
+    if plan.token != preview_token:
+        raise StaleCatalogPreviewError(
+            "The catalog changed since this preview; preview the merge again."
+        )
+
+    loser_snapshot = (locked_loser.pk, locked_loser.canonical_name, locked_loser.canonical_key)
+    survivor_snapshot = (
+        locked_survivor.pk,
+        locked_survivor.canonical_name,
+        locked_survivor.canonical_key,
+    )
+    _execute_merge(plan, locked_loser, locked_survivor)
+    audit = _write_merge_audit(
+        actor=actor,
+        reason=merge_reason,
+        loser_snapshot=loser_snapshot,
+        survivor_snapshot=survivor_snapshot,
+        plan=plan,
+    )
+    return SkillConceptMergeResult(survivor=locked_survivor, audit=audit)
+
+
+def _validate_concept_merge(loser: SkillConcept, survivor: SkillConcept) -> None:
+    if loser.pk == survivor.pk:
+        raise ValidationError("Choose a different concept to merge into.")
+
+
+def _merge_affected_application_ids(loser: SkillConcept) -> list[int]:
+    from apps.applications.models import ApplicationSkillRequirement
+
+    return sorted(
+        ApplicationSkillRequirement.objects.filter(alias__concept=loser)
+        .values_list("application_id", flat=True)
+        .distinct()
+    )
+
+
+def _lock_filter(queryset: QuerySet[Any, Any], lock: bool) -> QuerySet[Any, Any]:
+    return queryset.select_for_update() if lock else queryset
+
+
+def _merge_plan(
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    *,
+    lock: bool,
+) -> _MergePlan:
+    from apps.applications.models import ApplicationSkillRequirement
+    from apps.profiles.models import ExperienceSkill, ProfileSkill, ProjectSkill
+
+    aliases = tuple(
+        _lock_filter(SkillAlias.objects.filter(concept=loser), lock).order_by(
+            "normalized_value", "pk"
+        )
+    )
+    alias_snapshots = tuple(
+        {
+            "id": alias.pk,
+            "display_name": alias.display_name,
+            "normalized_value": alias.normalized_value,
+            "was_canonical": alias.is_canonical,
+        }
+        for alias in aliases
+    )
+    alias_requirement_counts = {
+        row["alias_id"]: row["total"]
+        for row in ApplicationSkillRequirement.objects.filter(
+            alias_id__in=[alias.pk for alias in aliases]
+        )
+        .values("alias_id")
+        .annotate(total=Count("id"))
+    }
+    profile = _association_merge(
+        kind="profile",
+        model=ProfileSkill,
+        owner_field="profile",
+        loser=loser,
+        survivor=survivor,
+        lock=lock,
+    )
+    experience = _association_merge(
+        kind="experience",
+        model=ExperienceSkill,
+        owner_field="experience",
+        loser=loser,
+        survivor=survivor,
+        lock=lock,
+    )
+    project = _association_merge(
+        kind="project",
+        model=ProjectSkill,
+        owner_field="project",
+        loser=loser,
+        survivor=survivor,
+        lock=lock,
+    )
+    requirements = _requirement_merge(loser=loser, survivor=survivor, lock=lock)
+    resumes = _resume_merge(loser=loser, survivor=survivor, lock=lock)
+    token = _merge_token(
+        loser,
+        survivor,
+        aliases,
+        profile,
+        experience,
+        project,
+        requirements,
+        resumes,
+    )
+    return _MergePlan(
+        token=token,
+        aliases=aliases,
+        alias_snapshots=alias_snapshots,
+        alias_requirement_counts=alias_requirement_counts,
+        profile=profile,
+        experience=experience,
+        project=project,
+        requirements=requirements,
+        resumes=resumes,
+    )
+
+
+def _association_merge(
+    *,
+    kind: str,
+    model: Any,
+    owner_field: str,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    lock: bool,
+) -> _AssociationMerge:
+    owner_column = f"{owner_field}_id"
+    loser_rows = list(_lock_filter(model.objects.filter(concept=loser), lock).order_by("pk"))
+    owner_ids = sorted({getattr(row, owner_column) for row in loser_rows})
+    survivor_rows = list(
+        _lock_filter(
+            model.objects.filter(concept=survivor, **{f"{owner_column}__in": owner_ids}),
+            lock,
+        ).order_by("pk")
+    )
+    survivor_by_owner = {getattr(row, owner_column): row for row in survivor_rows}
+
+    collisions: list[SkillAssociationCollision] = []
+    discarded: list[int] = []
+    affected: set[int] = set()
+    for row in loser_rows:
+        affected.add(row.pk)
+        survivor_row = survivor_by_owner.get(getattr(row, owner_column))
+        if survivor_row is None:
+            continue
+        affected.add(survivor_row.pk)
+        discarded.append(row.pk)
+        collisions.append(
+            SkillAssociationCollision(
+                kind=kind,
+                owner_id=getattr(row, owner_column),
+                kept_id=survivor_row.pk,
+                discarded_id=row.pk,
+                kept_position=min(survivor_row.position, row.position),
+            )
+        )
+    return _AssociationMerge(
+        kind=kind,
+        model=model,
+        owner_field=owner_field,
+        loser_rows=tuple(loser_rows),
+        survivor_rows=tuple(survivor_rows),
+        collisions=tuple(collisions),
+        affected_ids=tuple(sorted(affected)),
+        discarded_ids=tuple(sorted(discarded)),
+    )
+
+
+def _requirement_merge(
+    *,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    lock: bool,
+) -> _RequirementMerge:
+    from apps.applications.models import ApplicationSkillRequirement
+
+    loser_alias_ids = set(SkillAlias.objects.filter(concept=loser).values_list("pk", flat=True))
+    survivor_alias_ids = set(
+        SkillAlias.objects.filter(concept=survivor).values_list("pk", flat=True)
+    )
+    relevant_alias_ids = loser_alias_ids | survivor_alias_ids
+    affected_applications = ApplicationSkillRequirement.objects.filter(
+        alias_id__in=loser_alias_ids
+    ).values("application_id")
+    queryset = ApplicationSkillRequirement.objects.select_related("alias").filter(
+        alias_id__in=relevant_alias_ids,
+        application_id__in=affected_applications,
+    )
+    rows = list(_lock_filter(queryset, lock).order_by("pk"))
+
+    grouped: dict[int, list[Any]] = {}
+    for row in rows:
+        grouped.setdefault(row.application_id, []).append(row)
+
+    required = ApplicationSkillRequirement.Classification.REQUIRED
+    collisions: list[RequirementCollision] = []
+    discarded: list[int] = []
+    promoted: list[int] = []
+    affected: set[int] = set()
+    for application_id, group in grouped.items():
+        affected.update(row.pk for row in group)
+        survivor_group = [row for row in group if row.alias_id in survivor_alias_ids]
+        keeper = survivor_group[0] if survivor_group else group[0]
+        removed = sorted(row.pk for row in group if row.pk != keeper.pk)
+        if not removed:
+            continue
+        is_promoted = keeper.classification != required and any(
+            row.classification == required for row in group
+        )
+        if is_promoted:
+            promoted.append(keeper.pk)
+        discarded.extend(removed)
+        collisions.append(
+            RequirementCollision(
+                application_id=application_id,
+                kept_requirement_id=keeper.pk,
+                discarded_requirement_ids=tuple(removed),
+                kept_classification=required if is_promoted else keeper.classification,
+                promoted=is_promoted,
+            )
+        )
+    return _RequirementMerge(
+        rows=tuple(rows),
+        collisions=tuple(collisions),
+        affected_ids=tuple(sorted(affected)),
+        discarded_ids=tuple(sorted(discarded)),
+        promoted_ids=tuple(sorted(promoted)),
+    )
+
+
+def _resume_merge(
+    *,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    lock: bool,
+) -> _ResumeMerge:
+    from apps.resumes.models import ResumeSkill
+
+    loser_rows = list(_lock_filter(ResumeSkill.objects.filter(concept=loser), lock).order_by("pk"))
+    resume_ids = sorted({row.resume_id for row in loser_rows})
+    survivor_rows = list(
+        _lock_filter(
+            ResumeSkill.objects.filter(concept=survivor, resume_id__in=resume_ids),
+            lock,
+        ).order_by("pk")
+    )
+    survivor_by_resume = {row.resume_id: row for row in survivor_rows}
+
+    collisions: list[ResumeSkillCollision] = []
+    discarded: list[int] = []
+    affected: set[int] = set()
+    for row in loser_rows:
+        affected.add(row.pk)
+        survivor_row = survivor_by_resume.get(row.resume_id)
+        if survivor_row is None:
+            continue
+        discarded.append(row.pk)
+        collisions.append(
+            ResumeSkillCollision(
+                resume_id=row.resume_id,
+                kept_resume_skill_id=survivor_row.pk,
+                discarded_resume_skill_id=row.pk,
+                included=survivor_row.included,
+                position=survivor_row.position,
+                has_label_override=survivor_row.label_override is not None,
+            )
+        )
+    return _ResumeMerge(
+        loser_rows=tuple(loser_rows),
+        survivor_rows=tuple(survivor_rows),
+        collisions=tuple(collisions),
+        affected_ids=tuple(sorted(affected)),
+        discarded_ids=tuple(sorted(discarded)),
+    )
+
+
+def _merge_token(
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    aliases: tuple[SkillAlias, ...],
+    profile: _AssociationMerge,
+    experience: _AssociationMerge,
+    project: _AssociationMerge,
+    requirements: _RequirementMerge,
+    resumes: _ResumeMerge,
+) -> str:
+    association_snapshot: list[list[Any]] = []
+    for merge in (profile, experience, project):
+        owner_column = f"{merge.owner_field}_id"
+        for row in (*merge.loser_rows, *merge.survivor_rows):
+            association_snapshot.append(
+                [
+                    merge.kind,
+                    row.pk,
+                    getattr(row, owner_column),
+                    row.concept_id,
+                    row.position,
+                ]
+            )
+    payload = {
+        "loser": [loser.pk, loser.canonical_key, loser.canonical_name],
+        "survivor": [survivor.pk, survivor.canonical_key, survivor.canonical_name],
+        "aliases": sorted(
+            [
+                alias.pk,
+                alias.concept_id,
+                alias.normalized_value,
+                alias.is_canonical,
+                alias.display_name,
+            ]
+            for alias in aliases
+        ),
+        "associations": sorted(association_snapshot, key=lambda item: (item[0], item[1])),
+        "requirements": sorted(
+            [
+                row.pk,
+                row.application_id,
+                row.alias_id,
+                row.alias.concept_id,
+                row.classification,
+            ]
+            for row in requirements.rows
+        ),
+        "resumes": sorted(
+            [
+                row.pk,
+                row.resume_id,
+                row.concept_id,
+                row.included,
+                row.position,
+                row.label_override or "",
+            ]
+            for row in (*resumes.loser_rows, *resumes.survivor_rows)
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _merge_preview_from_plan(
+    loser: SkillConcept,
+    survivor: SkillConcept,
+    plan: _MergePlan,
+) -> SkillConceptMergePreview:
+    aliases = tuple(
+        MergedAliasDetail(
+            alias_id=alias.pk,
+            display_name=alias.display_name,
+            normalized_value=alias.normalized_value,
+            is_canonical=alias.is_canonical,
+            requirement_count=plan.alias_requirement_counts.get(alias.pk, 0),
+        )
+        for alias in plan.aliases
+    )
+    return SkillConceptMergePreview(
+        loser_concept_id=loser.pk,
+        survivor_concept_id=survivor.pk,
+        token=plan.token,
+        aliases=aliases,
+        profile_skill_ids=plan.profile.affected_ids,
+        experience_skill_ids=plan.experience.affected_ids,
+        project_skill_ids=plan.project.affected_ids,
+        requirement_ids=plan.requirements.affected_ids,
+        resume_skill_ids=plan.resumes.affected_ids,
+        skill_collisions=(
+            *plan.profile.collisions,
+            *plan.experience.collisions,
+            *plan.project.collisions,
+        ),
+        requirement_collisions=plan.requirements.collisions,
+        resume_collisions=plan.resumes.collisions,
+    )
+
+
+def _execute_merge(
+    plan: _MergePlan,
+    loser: SkillConcept,
+    survivor: SkillConcept,
+) -> None:
+    from apps.applications.models import ApplicationSkillRequirement
+    from apps.resumes.models import ResumeSkill
+
+    for merge in (plan.profile, plan.experience, plan.project):
+        _execute_association_merge(merge, survivor)
+
+    if plan.requirements.discarded_ids:
+        ApplicationSkillRequirement.objects.filter(pk__in=plan.requirements.discarded_ids).delete()
+    if plan.requirements.promoted_ids:
+        ApplicationSkillRequirement.objects.filter(pk__in=plan.requirements.promoted_ids).update(
+            classification=ApplicationSkillRequirement.Classification.REQUIRED
+        )
+
+    if plan.resumes.discarded_ids:
+        ResumeSkill.objects.filter(pk__in=plan.resumes.discarded_ids).delete()
+    moved_resume_ids = [
+        row.pk for row in plan.resumes.loser_rows if row.pk not in set(plan.resumes.discarded_ids)
+    ]
+    if moved_resume_ids:
+        ResumeSkill.objects.filter(pk__in=moved_resume_ids).update(concept=survivor)
+
+    with catalog_operation():
+        for alias in plan.aliases:
+            alias.concept = survivor
+            alias.is_canonical = False
+            alias.save(update_fields=["concept", "is_canonical"])
+        loser.delete()
+
+
+def _execute_association_merge(merge: _AssociationMerge, survivor: SkillConcept) -> None:
+    model = merge.model
+    owner_column = f"{merge.owner_field}_id"
+    for collision in merge.collisions:
+        model.objects.filter(pk=collision.kept_id).update(position=collision.kept_position)
+    discarded = set(merge.discarded_ids)
+    moved_ids = [row.pk for row in merge.loser_rows if row.pk not in discarded]
+    if moved_ids:
+        model.objects.filter(pk__in=moved_ids).update(concept=survivor)
+    if merge.discarded_ids:
+        model.objects.filter(pk__in=merge.discarded_ids).delete()
+    for owner_id in sorted({collision.owner_id for collision in merge.collisions}):
+        rows = model.objects.filter(**{owner_column: owner_id}).order_by("position", "id")
+        for position, row in enumerate(rows):
+            if row.position != position:
+                model.objects.filter(pk=row.pk).update(position=position)
+
+
+def _write_merge_audit(
+    *,
+    actor: Any,
+    reason: str,
+    loser_snapshot: tuple[int, str, str],
+    survivor_snapshot: tuple[int, str, str],
+    plan: _MergePlan,
+) -> SkillConceptMergeAudit:
+    collision_outcomes = (
+        [
+            {
+                "kind": collision.kind,
+                "owner_id": collision.owner_id,
+                "kept_id": collision.kept_id,
+                "discarded_id": collision.discarded_id,
+                "kept_position": collision.kept_position,
+            }
+            for collision in (
+                *plan.profile.collisions,
+                *plan.experience.collisions,
+                *plan.project.collisions,
+            )
+        ]
+        + [
+            {
+                "kind": "requirement",
+                "application_id": collision.application_id,
+                "kept_id": collision.kept_requirement_id,
+                "discarded_ids": list(collision.discarded_requirement_ids),
+                "kept_classification": collision.kept_classification,
+                "promoted": collision.promoted,
+            }
+            for collision in plan.requirements.collisions
+        ]
+        + [
+            {
+                "kind": "resume_skill",
+                "resume_id": collision.resume_id,
+                "kept_id": collision.kept_resume_skill_id,
+                "discarded_id": collision.discarded_resume_skill_id,
+                "included": collision.included,
+                "position": collision.position,
+                "has_label_override": collision.has_label_override,
+            }
+            for collision in plan.resumes.collisions
+        ]
+    )
+    affected_relationship_count = (
+        len(plan.profile.affected_ids)
+        + len(plan.experience.affected_ids)
+        + len(plan.project.affected_ids)
+        + len(plan.requirements.affected_ids)
+        + len(plan.resumes.affected_ids)
+    )
+    loser_id, loser_name, loser_key = loser_snapshot
+    survivor_id, survivor_name, survivor_key = survivor_snapshot
+    affected_application_ids = sorted({row.application_id for row in plan.requirements.rows})
+    return SkillConceptMergeAudit.objects.create(
+        actor_id=actor.pk,
+        actor_email=actor.email,
+        reason=reason,
+        loser_concept_id=loser_id,
+        loser_concept_name=loser_name,
+        loser_concept_key=loser_key,
+        survivor_concept_id=survivor_id,
+        survivor_concept_name=survivor_name,
+        survivor_concept_key=survivor_key,
+        moved_alias_ids=[snapshot["id"] for snapshot in plan.alias_snapshots],
+        moved_alias_snapshots=list(plan.alias_snapshots),
+        affected_application_ids=affected_application_ids,
+        affected_profile_skill_ids=list(plan.profile.affected_ids),
+        affected_experience_skill_ids=list(plan.experience.affected_ids),
+        affected_project_skill_ids=list(plan.project.affected_ids),
+        affected_requirement_ids=list(plan.requirements.affected_ids),
+        affected_resume_skill_ids=list(plan.resumes.affected_ids),
+        discarded_profile_skill_ids=list(plan.profile.discarded_ids),
+        discarded_experience_skill_ids=list(plan.experience.discarded_ids),
+        discarded_project_skill_ids=list(plan.project.discarded_ids),
+        discarded_requirement_ids=list(plan.requirements.discarded_ids),
+        discarded_resume_skill_ids=list(plan.resumes.discarded_ids),
+        promoted_requirement_ids=list(plan.requirements.promoted_ids),
+        collision_outcomes=collision_outcomes,
+        affected_relationship_count=affected_relationship_count,
+    )

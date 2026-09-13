@@ -192,3 +192,59 @@ class SkillCatalogAudit(models.Model):
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         raise ValidationError("Skill catalog audits are immutable.")
+
+
+class SkillConceptMergeAudit(models.Model):
+    """An append-only record of one administrative Skill Concept merge.
+
+    The audit is a content-free scalar snapshot: it records the acting
+    administrator, the required reason, the public wording of the deleted and
+    surviving concepts, the moved aliases, the affected private relationship
+    IDs and counts, and the resolved collision outcomes. It never stores
+    candidate-owned content such as role titles, job descriptions, candidate
+    account emails, or company names. It survives the merge and is never
+    updated or deleted.
+    """
+
+    actor_id = models.BigIntegerField()
+    actor_email = models.CharField(max_length=254)
+    reason = models.TextField()
+    loser_concept_id = models.BigIntegerField()
+    loser_concept_name = models.CharField(max_length=200)
+    loser_concept_key = models.CharField(max_length=200)
+    survivor_concept_id = models.BigIntegerField()
+    survivor_concept_name = models.CharField(max_length=200)
+    survivor_concept_key = models.CharField(max_length=200)
+    moved_alias_ids = models.JSONField(default=list)
+    moved_alias_snapshots = models.JSONField(default=list)
+    affected_application_ids = models.JSONField(default=list)
+    affected_profile_skill_ids = models.JSONField(default=list)
+    affected_experience_skill_ids = models.JSONField(default=list)
+    affected_project_skill_ids = models.JSONField(default=list)
+    affected_requirement_ids = models.JSONField(default=list)
+    affected_resume_skill_ids = models.JSONField(default=list)
+    discarded_profile_skill_ids = models.JSONField(default=list)
+    discarded_experience_skill_ids = models.JSONField(default=list)
+    discarded_project_skill_ids = models.JSONField(default=list)
+    discarded_requirement_ids = models.JSONField(default=list)
+    discarded_resume_skill_ids = models.JSONField(default=list)
+    promoted_requirement_ids = models.JSONField(default=list)
+    collision_outcomes = models.JSONField(default=list)
+    affected_relationship_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        verbose_name = "skill concept merge audit"
+        verbose_name_plural = "skill concept merge audits"
+
+    def __str__(self) -> str:
+        return f"Merge of {self.loser_concept_name} into {self.survivor_concept_name}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Skill concept merge audits are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Skill concept merge audits are immutable.")

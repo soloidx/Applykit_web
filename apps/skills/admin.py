@@ -13,13 +13,16 @@ from apps.skills.models import (
     SkillAlias,
     SkillCatalogAudit,
     SkillConcept,
+    SkillConceptMergeAudit,
     normalize_skill_label,
 )
 from apps.skills.services import (
     SkillConceptDetail,
     create_skill_alias,
     delete_skill_alias,
+    merge_skill_concept,
     preview_skill_alias_reassignment,
+    preview_skill_concept_merge,
     reassign_skill_alias,
     rename_skill_alias,
     rename_skill_concept,
@@ -33,6 +36,37 @@ def _alias_repair_links(alias_id: int) -> str:
         reverse("admin:skills_skillalias_reassign", args=[alias_id]),
         reverse("admin:skills_skillalias_delete_audited", args=[alias_id]),
     )
+
+
+class _RepairReasonForm(forms.Form):
+    template_name = ""
+
+    reason = forms.CharField(
+        widget=forms.Textarea,
+        label="Repair reason",
+        help_text="Required. Recorded on the immutable catalog audit.",
+    )
+
+
+class ConceptMergeForm(_RepairReasonForm):
+    template_name = "admin/skills/skillconcept/merge.html"
+
+    survivor = forms.ModelChoiceField(
+        queryset=SkillConcept.objects.none(),
+        label="Surviving concept",
+        help_text=(
+            "Every alias and private reference moves to this concept, then the "
+            "other concept is hard-deleted."
+        ),
+    )
+
+    def __init__(self, *args: Any, loser: SkillConcept, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        survivor = self.fields["survivor"]
+        if isinstance(survivor, forms.ModelChoiceField):
+            survivor.queryset = SkillConcept.objects.exclude(pk=loser.pk).order_by(
+                "canonical_name", "pk"
+            )
 
 
 class SkillConceptAdminForm(forms.ModelForm):
@@ -58,7 +92,84 @@ class SkillConceptAdmin(admin.ModelAdmin):
     form = SkillConceptAdminForm
     list_display = ("canonical_name", "canonical_key", "created_at")
     search_fields = ("canonical_name", "canonical_key", "aliases__display_name")
-    readonly_fields = ("canonical_key", "created_at", "updated_at", "catalog_references")
+    readonly_fields = (
+        "canonical_key",
+        "created_at",
+        "updated_at",
+        "catalog_references",
+        "merge_link",
+    )
+
+    def get_urls(self) -> list[Any]:
+        custom = [
+            path(
+                "<path:object_id>/merge/",
+                self.admin_site.admin_view(self.merge_view),
+                name="skills_skillconcept_merge",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    @admin.display(description="Merge")
+    def merge_link(self, obj: SkillConcept | None = None) -> str:
+        if obj is None or obj.pk is None:
+            return "-"
+        return format_html(
+            '<a href="{}">Merge this concept into a survivor</a>',
+            reverse("admin:skills_skillconcept_merge", args=[obj.pk]),
+        )
+
+    def merge_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+        loser = get_object_or_404(SkillConcept.objects, pk=object_id)
+        title = f"Merge concept {loser.canonical_name}"
+        form = ConceptMergeForm(loser=loser)
+        context: dict[str, Any] = {
+            **self.admin_site.each_context(request),
+            "title": title,
+            "loser": loser,
+            "form": form,
+            "opts": self.model._meta,
+        }
+        if request.method == "POST":
+            form = ConceptMergeForm(request.POST, loser=loser)
+            context["form"] = form
+            if form.is_valid():
+                survivor = form.cleaned_data["survivor"]
+                reason = form.cleaned_data["reason"]
+                action = request.POST.get("action")
+                if action == "preview":
+                    try:
+                        context["preview"] = preview_skill_concept_merge(
+                            loser=loser,
+                            survivor=survivor,
+                            actor=request.user,
+                        )
+                    except ValidationError as error:
+                        form.add_error(None, error)
+                    else:
+                        return TemplateResponse(request, form.template_name, context)
+                elif action == "confirm":
+                    try:
+                        merge_skill_concept(
+                            loser=loser,
+                            survivor=survivor,
+                            actor=request.user,
+                            reason=reason,
+                            preview_token=request.POST.get("preview_token", ""),
+                        )
+                    except ValidationError as error:
+                        form.add_error(None, error)
+                    else:
+                        self.message_user(
+                            request,
+                            f"Merged concept '{loser.canonical_name}' into {survivor}.",
+                        )
+                        return redirect(
+                            reverse("admin:skills_skillconcept_change", args=[survivor.pk])
+                        )
+        return TemplateResponse(request, form.template_name, context)
 
     def save_model(
         self,
@@ -156,16 +267,6 @@ class SkillAliasAdminForm(forms.ModelForm):
         ).first()
         if owner and owner.pk != concept.pk:
             raise ValidationError("This label already belongs to another skill concept.")
-
-
-class _RepairReasonForm(forms.Form):
-    template_name = ""
-
-    reason = forms.CharField(
-        widget=forms.Textarea,
-        label="Repair reason",
-        help_text="Required. Recorded on the immutable catalog audit.",
-    )
 
 
 class AliasReassignmentForm(_RepairReasonForm):
@@ -357,4 +458,29 @@ class SkillCatalogAuditAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request: Any, obj: SkillCatalogAudit | None = None) -> bool:
+        return False
+
+
+@admin.register(SkillConceptMergeAudit)
+class SkillConceptMergeAuditAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "actor_email",
+        "loser_concept_name",
+        "survivor_concept_name",
+        "affected_relationship_count",
+    )
+    readonly_fields = tuple(field.name for field in SkillConceptMergeAudit._meta.fields)
+
+    def has_add_permission(self, request: Any) -> bool:
+        return False
+
+    def has_change_permission(
+        self, request: Any, obj: SkillConceptMergeAudit | None = None
+    ) -> bool:
+        return False
+
+    def has_delete_permission(
+        self, request: Any, obj: SkillConceptMergeAudit | None = None
+    ) -> bool:
         return False

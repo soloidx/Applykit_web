@@ -1,0 +1,69 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>Losing concept: <strong>{{ loser }}</strong> ({{ loser.canonical_key }})</p>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    {% if preview %}
+      <h2>Preview</h2>
+      <p>
+        Aliases moving to the survivor: {{ preview.aliases|length }}<br>
+        Private references: {{ preview.profile_skill_ids|length }} profile,
+        {{ preview.experience_skill_ids|length }} experience,
+        {{ preview.project_skill_ids|length }} project,
+        {{ preview.requirement_ids|length }} application requirement(s),
+        {{ preview.resume_skill_ids|length }} resume skill(s).<br>
+        Discarded rows: {{ preview.discarded_profile_skill_ids|length }} profile,
+        {{ preview.discarded_experience_skill_ids|length }} experience,
+        {{ preview.discarded_project_skill_ids|length }} project,
+        {{ preview.discarded_requirement_ids|length }} application requirement(s),
+        {{ preview.discarded_resume_skill_ids|length }} resume skill(s).<br>
+        Promoted to Required: {{ preview.promoted_requirement_ids|length }}
+      </p>
+      <h3>Aliases</h3>
+      <ul>
+        {% for alias in preview.aliases %}
+          <li>
+            {{ alias.display_name }} ({{ alias.normalized_value }}){% if alias.is_canonical %}
+            - canonical{% endif %}; {{ alias.requirement_count }} application skill requirement(s)
+          </li>
+        {% endfor %}
+      </ul>
+      {% if preview.skill_collisions or preview.requirement_collisions or preview.resume_collisions %}
+        <h3>Collisions</h3>
+        <ul>
+          {% for collision in preview.skill_collisions %}
+            <li>
+              {{ collision.kind }} {{ collision.owner_id }}: keep association
+              {{ collision.kept_id }} at position {{ collision.kept_position }} and discard
+              association {{ collision.discarded_id }}
+            </li>
+          {% endfor %}
+          {% for collision in preview.requirement_collisions %}
+            <li>
+              Job Application {{ collision.application_id }}: keep requirement
+              {{ collision.kept_requirement_id }} ({{ collision.kept_classification }}){% if collision.promoted %}
+              (promoted to Required){% endif %} and discard requirement(s)
+              {{ collision.discarded_requirement_ids|join:", " }}
+            </li>
+          {% endfor %}
+          {% for collision in preview.resume_collisions %}
+            <li>
+              Resume {{ collision.resume_id }}: keep resume skill
+              {{ collision.kept_resume_skill_id }} (position {{ collision.position }}, included
+              {{ collision.included }}, label override
+              {% if collision.has_label_override %}kept{% else %}none{% endif %}) and discard
+              resume skill {{ collision.discarded_resume_skill_id }}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <input type="hidden" name="preview_token" value="{{ preview.token }}">
+      <input type="submit" name="action" value="confirm">
+    {% else %}
+      <input type="submit" name="action" value="preview">
+    {% endif %}
+  </form>
+{% endblock %}
